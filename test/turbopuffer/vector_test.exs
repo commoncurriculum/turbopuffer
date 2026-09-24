@@ -23,7 +23,7 @@ defmodule Turbopuffer.VectorTest do
       ]
 
       # This test validates the vector structure is properly formatted
-      assert {:error, _} = Vector.write(namespace, vectors)
+      assert {:error, _} = Vector.write(namespace, upsert_rows: vectors)
     end
 
     test "handles vectors with atom keys", %{namespace: namespace} do
@@ -36,7 +36,42 @@ defmodule Turbopuffer.VectorTest do
       ]
 
       # Test that atom keys are properly converted
-      assert {:error, _} = Vector.write(namespace, vectors)
+      assert {:error, _} = Vector.write(namespace, upsert_rows: vectors)
+    end
+  end
+
+  describe "unknown options" do
+    test "raise instead of being dropped", %{namespace: namespace} do
+      assert_raise ArgumentError, ~r/\[:upsert_conditon\] for Turbopuffer.write\/2/, fn ->
+        Vector.write(namespace, upsert_rows: [%{id: 1}], upsert_conditon: ["id", "Eq", nil])
+      end
+
+      assert_raise ArgumentError, ~r/\[:limit\] for Turbopuffer.query\/2/, fn ->
+        Vector.query(namespace, vector: [0.1], limit: 5)
+      end
+
+      assert_raise ArgumentError, ~r/\[:text\] for Turbopuffer.text_search\/2/, fn ->
+        Turbopuffer.text_search(namespace, query: "q", attribute: "a", text: "q")
+      end
+
+      assert_raise ArgumentError, ~r/\[:k\] for Turbopuffer.hybrid_search\/2/, fn ->
+        Turbopuffer.hybrid_search(namespace,
+          vector: [0.1],
+          text_query: "q",
+          text_attribute: "a",
+          k: 5
+        )
+      end
+
+      assert_raise ArgumentError, ~r/\[:rerank\] for Turbopuffer.multi_query\/2/, fn ->
+        Turbopuffer.multi_query(namespace, queries: [], rerank: true)
+      end
+    end
+
+    test "raise for options that aren't a keyword list", %{namespace: namespace} do
+      assert_raise ArgumentError, ~r/Turbopuffer.write\/2 expects a keyword list/, fn ->
+        Vector.write(namespace, [%{id: "doc1", vector: [0.1]}])
+      end
     end
   end
 
