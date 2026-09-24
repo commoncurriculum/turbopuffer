@@ -116,7 +116,7 @@ end)
 ```elixir
 client = Turbopuffer.new(
   api_key: "your-key",
-  region: :gcp_us_central1  # or :gcp_europe_west4, :gcp_asia_northeast1
+  region: :gcp_us_central1  # any region from https://turbopuffer.com/docs/regions, e.g. "aws-us-east-1"
 )
 ```
 

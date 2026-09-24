@@ -46,7 +46,7 @@ defmodule Turbopuffer do
   # Client options
   @type client_opts :: [
           {:api_key, String.t()}
-          | {:region, :gcp_us_central1 | :gcp_europe_west4 | :gcp_asia_northeast1}
+          | {:region, atom() | String.t()}
           | {:base_url, String.t()}
           | {:finch_name, atom()}
         ]
@@ -135,7 +135,7 @@ defmodule Turbopuffer do
 
   ## Options
     * `:api_key` - The API key for authentication (can also use TURBOPUFFER_API_KEY env var)
-    * `:region` - The region to connect to (defaults to :gcp_us_central1)
+    * `:region` - Any turbopuffer region, e.g. `"aws-us-east-1"` or `:aws_us_east_1` (defaults to :gcp_us_central1)
     * `:base_url` - Override the base URL for the API
 
   ## Examples

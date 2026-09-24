@@ -3,13 +3,6 @@ defmodule Turbopuffer.Client do
   HTTP client for the Turbopuffer API using Finch.
   """
 
-  @regions %{
-    gcp_us_central1: "https://gcp-us-central1.turbopuffer.com",
-    gcp_us_east4: "https://gcp-us-east4.turbopuffer.com",
-    gcp_europe_west4: "https://gcp-europe-west4.turbopuffer.com",
-    gcp_asia_northeast1: "https://gcp-asia-northeast1.turbopuffer.com"
-  }
-
   defstruct [:api_key, :base_url, :finch_name]
 
   @type t :: %__MODULE__{
@@ -25,8 +18,9 @@ defmodule Turbopuffer.Client do
 
   ## Options
     * `:api_key` - Required. The API key for authentication
-    * `:region` - Optional. The region to connect to (defaults to :gcp_us_central1)
-    * `:base_url` - Optional. Override the base URL
+    * `:region` - Optional. Any turbopuffer region, as a string (`"aws-us-east-1"`) or an atom
+      (`:aws_us_east_1`). Defaults to `:gcp_us_central1`. See https://turbopuffer.com/docs/regions
+    * `:base_url` - Optional. Overrides the region's URL
     * `:finch_name` - Optional. The name of the Finch pool (defaults to Turbopuffer.Finch)
   """
   @spec new(Turbopuffer.client_opts()) :: t()
@@ -38,8 +32,11 @@ defmodule Turbopuffer.Client do
             "API key is required. Pass :api_key option or set TURBOPUFFER_API_KEY environment variable"
     end
 
-    region = Keyword.get(opts, :region, :gcp_us_central1)
-    base_url = Keyword.get(opts, :base_url, Map.fetch!(@regions, region))
+    base_url =
+      Keyword.get_lazy(opts, :base_url, fn ->
+        opts |> Keyword.get(:region, :gcp_us_central1) |> region_url()
+      end)
+
     finch_name = Keyword.get(opts, :finch_name, Turbopuffer.Finch)
 
     %__MODULE__{
@@ -47,6 +44,23 @@ defmodule Turbopuffer.Client do
       base_url: base_url,
       finch_name: finch_name
     }
+  end
+
+  defp region_url(region) when is_atom(region) do
+    region |> Atom.to_string() |> String.replace("_", "-") |> region_url()
+  end
+
+  defp region_url(region) when is_binary(region) do
+    if region =~ ~r/\A[a-z0-9]+(-[a-z0-9]+)+\z/ do
+      "https://#{region}.turbopuffer.com"
+    else
+      raise ArgumentError,
+            "invalid turbopuffer region #{inspect(region)}, expected a name like \"aws-us-east-1\""
+    end
+  end
+
+  defp region_url(region) do
+    raise ArgumentError, "invalid turbopuffer region #{inspect(region)}"
   end
 
   @doc """
