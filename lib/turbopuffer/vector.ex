@@ -3,7 +3,46 @@ defmodule Turbopuffer.Vector do
   Handles vector operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Result}
+  alias Turbopuffer.{Client, Namespace, Options, Result}
+
+  @passthrough_write_options [
+    :patch_by_filter,
+    :patch_by_filter_allow_partial,
+    :delete_by_filter_allow_partial,
+    :return_affected_ids,
+    :branch_from_namespace,
+    :sharding,
+    :disable_backpressure
+  ]
+
+  @write_options [
+                   :upsert_rows,
+                   :upsert_columns,
+                   :patch_rows,
+                   :patch_columns,
+                   :deletes,
+                   :delete_by_filter,
+                   :distance_metric,
+                   :schema,
+                   :upsert_condition,
+                   :patch_condition,
+                   :delete_condition,
+                   :copy_from_namespace,
+                   :encryption
+                 ] ++ @passthrough_write_options
+
+  @query_options [
+    :vector,
+    :top_k,
+    :include_attributes,
+    :include_vectors,
+    :filters,
+    :exclude_attributes,
+    :aggregate_by,
+    :group_by,
+    :vector_encoding,
+    :consistency
+  ]
 
   @doc """
   Writes vectors to a namespace (upserts, patches, and/or deletes).
@@ -22,6 +61,15 @@ defmodule Turbopuffer.Vector do
     * `:delete_condition` - Conditional delete
     * `:copy_from_namespace` - Copy all documents from another namespace
     * `:encryption` - Customer managed encryption configuration
+    * `:patch_by_filter` - `%{filters: ..., patch: ...}` to patch every document matching a filter
+    * `:patch_by_filter_allow_partial`, `:delete_by_filter_allow_partial` - Let filter writes stop at
+      turbopuffer's per-request limit instead of failing
+    * `:return_affected_ids` - Return the ids that were upserted, patched, and deleted
+    * `:branch_from_namespace` - Branch from another namespace
+    * `:sharding` - Sharding configuration
+    * `:disable_backpressure` - Accept writes past the unindexed-data limit
+
+  Unknown options raise `ArgumentError`.
 
   ## Examples
 
@@ -60,6 +108,7 @@ defmodule Turbopuffer.Vector do
   @spec write(Namespace.t(), keyword()) ::
           {:ok, Turbopuffer.success_response()} | {:error, term()}
   def write(%Namespace{} = namespace, opts \\ []) do
+    Options.validate!(opts, @write_options, "Turbopuffer.write/2")
     path = "/v2/namespaces/#{namespace.name}"
 
     body =
@@ -135,8 +184,11 @@ defmodule Turbopuffer.Vector do
     Map.put(acc, "encryption", config)
   end
 
-  # Ignore unknown options
-  defp build_write_body(_, acc), do: acc
+  defp build_write_body({key, nil}, acc) when key in @passthrough_write_options, do: acc
+
+  defp build_write_body({key, value}, acc) when key in @passthrough_write_options do
+    Map.put(acc, Atom.to_string(key), value)
+  end
 
   @doc """
   Queries vectors by similarity.
@@ -152,6 +204,8 @@ defmodule Turbopuffer.Vector do
     * `:group_by` - Attributes to group aggregations by
     * `:vector_encoding` - Vector encoding format (:float or :base64)
     * `:consistency` - Read consistency (:strong or :eventual)
+
+  Unknown options raise `ArgumentError`.
 
   ## Examples
 
@@ -179,6 +233,7 @@ defmodule Turbopuffer.Vector do
   @spec query(Namespace.t(), Turbopuffer.vector_query_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def query(%Namespace{} = namespace, opts) do
+    Options.validate!(opts, @query_options, "Turbopuffer.query/2")
     vector = Keyword.fetch!(opts, :vector)
     path = "/v2/namespaces/#{namespace.name}/query"
 
