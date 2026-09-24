@@ -2,6 +2,11 @@ defmodule TurbopufferTest do
   use ExUnit.Case
   doctest Turbopuffer
 
+  defmodule CustomJSON do
+    def encode!(term), do: Jason.encode!(term)
+    def decode(binary), do: Jason.decode(binary)
+  end
+
   describe "client creation" do
     test "creates client with API key" do
       client = Turbopuffer.new(api_key: "test-key")
@@ -27,6 +32,36 @@ defmodule TurbopufferTest do
       end
 
       if original_env, do: System.put_env("TURBOPUFFER_API_KEY", original_env)
+    end
+  end
+
+  describe "JSON library" do
+    test "defaults to Elixir's JSON when it exists, and Jason otherwise" do
+      expected = if Code.ensure_loaded?(JSON), do: JSON, else: Jason
+      assert Turbopuffer.new(api_key: "test-key").json_library == expected
+    end
+
+    test "comes from the :json_library option, then the application setting" do
+      Application.put_env(:turbopuffer, :json_library, Jason)
+      on_exit(fn -> Application.delete_env(:turbopuffer, :json_library) end)
+
+      assert Turbopuffer.new(api_key: "test-key").json_library == Jason
+
+      assert Turbopuffer.new(api_key: "test-key", json_library: __MODULE__.CustomJSON).json_library ==
+               __MODULE__.CustomJSON
+    end
+
+    test "raises when the library isn't available" do
+      assert_raise ArgumentError, ~r/JSON library NoSuchJSON is not available/, fn ->
+        Turbopuffer.new(api_key: "test-key", json_library: NoSuchJSON)
+      end
+    end
+
+    test "decodes turbopuffer's responses with the configured library" do
+      client = Turbopuffer.new(api_key: "not-a-real-key", json_library: Jason)
+
+      assert {:error, {:http_error, 401, %{"status" => "error", "error" => _}}} =
+               Turbopuffer.list_namespaces(client)
     end
   end
 

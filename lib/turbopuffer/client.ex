@@ -10,12 +10,16 @@ defmodule Turbopuffer.Client do
     gcp_asia_northeast1: "https://gcp-asia-northeast1.turbopuffer.com"
   }
 
-  defstruct [:api_key, :base_url, :finch_name]
+  # Elixir 1.18 ships a JSON module; older versions need Jason.
+  @default_json_library if Code.ensure_loaded?(JSON), do: JSON, else: Jason
+
+  defstruct [:api_key, :base_url, :finch_name, :json_library]
 
   @type t :: %__MODULE__{
           api_key: String.t(),
           base_url: String.t(),
-          finch_name: atom()
+          finch_name: atom(),
+          json_library: module()
         }
 
   @type response :: {:ok, map()} | {:error, term()}
@@ -28,6 +32,8 @@ defmodule Turbopuffer.Client do
     * `:region` - Optional. The region to connect to (defaults to :gcp_us_central1)
     * `:base_url` - Optional. Override the base URL
     * `:finch_name` - Optional. The name of the Finch pool (defaults to Turbopuffer.Finch)
+    * `:json_library` - Optional. A module with `encode!/1` and `decode/1`. Defaults to the
+      `:json_library` application setting, then to Elixir's `JSON` on 1.18+ and `Jason` before that.
   """
   @spec new(Turbopuffer.client_opts()) :: t()
   def new(opts) do
@@ -42,10 +48,22 @@ defmodule Turbopuffer.Client do
     base_url = Keyword.get(opts, :base_url, Map.fetch!(@regions, region))
     finch_name = Keyword.get(opts, :finch_name, Turbopuffer.Finch)
 
+    json_library =
+      Keyword.get_lazy(opts, :json_library, fn ->
+        Application.get_env(:turbopuffer, :json_library, @default_json_library)
+      end)
+
+    unless Code.ensure_loaded?(json_library) do
+      raise ArgumentError,
+            "JSON library #{inspect(json_library)} is not available. " <>
+              "Add {:jason, \"~> 1.4\"} to your deps or set the :json_library option"
+    end
+
     %__MODULE__{
       api_key: api_key,
       base_url: base_url,
-      finch_name: finch_name
+      finch_name: finch_name,
+      json_library: json_library
     }
   end
 
@@ -62,12 +80,12 @@ defmodule Turbopuffer.Client do
       {"accept", "application/json"}
     ]
 
-    encoded_body = if body, do: JSON.encode!(body), else: nil
+    encoded_body = if body, do: client.json_library.encode!(body), else: nil
 
     request = Finch.build(method, url, headers, encoded_body)
 
     with {:ok, response} <- Finch.request(request, client.finch_name, opts),
-         {:ok, decoded_body} <- decode_response(response) do
+         {:ok, decoded_body} <- decode_response(response, client.json_library) do
       if response.status in 200..299 do
         {:ok, decoded_body}
       else
@@ -94,10 +112,10 @@ defmodule Turbopuffer.Client do
   @spec delete(t(), String.t(), Turbopuffer.request_opts()) :: response()
   def delete(client, path, opts \\ []), do: request(client, :delete, path, nil, opts)
 
-  defp decode_response(%{body: ""}), do: {:ok, %{}}
+  defp decode_response(%{body: ""}, _json_library), do: {:ok, %{}}
 
-  defp decode_response(%{body: body}) when is_binary(body) do
-    case JSON.decode(body) do
+  defp decode_response(%{body: body}, json_library) when is_binary(body) do
+    case json_library.decode(body) do
       {:ok, decoded} -> {:ok, decoded}
       {:error, _} = error -> error
     end
