@@ -78,7 +78,10 @@ defmodule Turbopuffer.Search do
   Performs a hybrid search combining vector and text search.
 
   ## Options
-    * `:vector` - The query vector (required)
+    * `:vector` - The query vector (required). Pass `{:embed, text}` or `{:embed, text, model}` to have
+      turbopuffer embed the text (https://turbopuffer.com/docs/embedding)
+    * `:vector_attribute` - The attribute to search by vector (default: "vector"). For native
+      embedding, the string attribute that has `embed` in the schema
     * `:text_query` - The text query string (required)
     * `:text_attribute` - The attribute to search text in (required)
     * `:top_k` - Number of results to return (default: 10)
@@ -95,6 +98,14 @@ defmodule Turbopuffer.Search do
         top_k: 20,
         filters: %{"category" => "tutorial"}
       )
+
+      # Let turbopuffer embed the query for an attribute it embeds natively
+      Turbopuffer.Search.hybrid(namespace,
+        vector: {:embed, "machine learning"},
+        vector_attribute: "content",
+        text_query: "machine learning",
+        text_attribute: "content"
+      )
   """
   @spec hybrid(Namespace.t(), Turbopuffer.hybrid_search_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
@@ -108,9 +119,11 @@ defmodule Turbopuffer.Search do
     filters = Keyword.get(opts, :filters)
 
     # Use multi_query for hybrid search
+    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
+
     queries = [
       %{
-        rank_by: ["vector", "ANN", vector],
+        rank_by: [vector_attribute, "ANN", Turbopuffer.Vector.ann_query(vector)],
         top_k: top_k,
         include_attributes: include_attributes,
         filters: filters

@@ -194,7 +194,10 @@ defmodule Turbopuffer.Vector do
   Queries vectors by similarity.
 
   ## Options
-    * `:vector` - The query vector (required)
+    * `:vector` - The query vector (required). Pass `{:embed, text}` or `{:embed, text, model}` to have
+      turbopuffer embed the text (https://turbopuffer.com/docs/embedding)
+    * `:vector_attribute` - The attribute to search (default: "vector"). For native embedding, the
+      string attribute that has `embed` in the schema
     * `:top_k` - Number of results to return (default: 10)
     * `:include_attributes` - List of attributes to include in results, or `true` for all (default: true)
     * `:filters` - Metadata filters to apply as a map
@@ -229,6 +232,12 @@ defmodule Turbopuffer.Vector do
         top_k: 10,
         include_vectors: true
       )
+
+      # Search a string attribute that turbopuffer embeds
+      Turbopuffer.Vector.query(namespace,
+        vector: {:embed, "foxes that jump"},
+        vector_attribute: "content"
+      )
   """
   @spec query(Namespace.t(), Turbopuffer.vector_query_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
@@ -249,7 +258,7 @@ defmodule Turbopuffer.Vector do
   # Build query body from options using pattern matching
   defp build_query_body(opts, vector) do
     base_body = %{
-      "rank_by" => ["vector", "ANN", vector],
+      "rank_by" => [Keyword.get(opts, :vector_attribute, "vector"), "ANN", ann_query(vector)],
       "top_k" => Keyword.get(opts, :top_k, 10),
       "include_attributes" => process_include_attributes(opts)
     }
@@ -261,14 +270,15 @@ defmodule Turbopuffer.Vector do
   defp process_include_attributes(opts) do
     include_attributes = Keyword.get(opts, :include_attributes, true)
     include_vectors = Keyword.get(opts, :include_vectors, false)
+    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
 
     # Normalize :all to true
     include_attributes = normalize_include_attributes(include_attributes)
 
     case {include_attributes, include_vectors} do
-      {true, true} -> ["vector"]
+      {true, true} -> [vector_attribute]
       {true, false} -> true
-      {attrs, true} when is_list(attrs) -> ["vector" | attrs] |> Enum.uniq()
+      {attrs, true} when is_list(attrs) -> [vector_attribute | attrs] |> Enum.uniq()
       {attrs, false} -> attrs
       _ -> include_attributes
     end
@@ -320,6 +330,22 @@ defmodule Turbopuffer.Vector do
   end
 
   defp add_query_option(_, acc), do: acc
+
+  @doc false
+  # The query side of an ANN rank_by: a vector, or text for turbopuffer to embed.
+  def ann_query({:embed, text}) when is_binary(text), do: ["Embed", text]
+
+  def ann_query({:embed, text, model}) when is_binary(text) and is_binary(model) do
+    ["Embed", text, %{"model" => model}]
+  end
+
+  def ann_query(vector) when is_list(vector), do: vector
+
+  def ann_query(other) do
+    raise ArgumentError,
+          "invalid :vector #{inspect(other)}, expected a list of numbers, {:embed, text}, " <>
+            "or {:embed, text, model}"
+  end
 
   # Handle different response formats with pattern matching
   defp handle_query_response({:ok, %{"rows" => rows}}) when is_list(rows) do
