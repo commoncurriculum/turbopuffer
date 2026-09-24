@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Enhancements
+
+- Support Elixir 1.15+: the JSON library is configurable with the `:json_library` client option or application setting, defaulting to Elixir's `JSON` on 1.18+ and `Jason` before that
+
 ## 0.2.0 (2026-02-19)
 
 ### Enhancements

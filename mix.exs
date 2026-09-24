@@ -5,7 +5,7 @@ defmodule Turbopuffer.MixProject do
     [
       app: :turbopuffer,
       version: "0.2.0",
-      elixir: "~> 1.18",
+      elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description: "Elixir client for the Turbopuffer vector search API",
@@ -28,6 +28,7 @@ defmodule Turbopuffer.MixProject do
   defp deps do
     [
       {:finch, "~> 0.20"},
+      {:jason, "~> 1.4", optional: true},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:bypass, "~> 2.1", only: :test}
     ]
