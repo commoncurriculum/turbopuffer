@@ -6,8 +6,17 @@ defmodule Turbopuffer.Search do
   alias Turbopuffer.{Client, Namespace, Options, Result}
 
   @text_options [:query, :attribute, :top_k, :include_attributes, :filters]
-  @hybrid_options [:vector, :text_query, :text_attribute, :top_k, :include_attributes, :filters]
-  @multi_query_options [:queries, :top_k, :include_attributes]
+  @hybrid_options [
+    :vector,
+    :vector_attribute,
+    :text_query,
+    :text_attribute,
+    :top_k,
+    :include_attributes,
+    :filters,
+    :rerank_by
+  ]
+  @multi_query_options [:queries, :top_k, :include_attributes, :rerank_by]
 
   @doc """
   Performs a full-text search using BM25 ranking.

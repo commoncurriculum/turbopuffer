@@ -33,6 +33,7 @@ defmodule Turbopuffer.Vector do
 
   @query_options [
     :vector,
+    :vector_attribute,
     :top_k,
     :include_attributes,
     :include_vectors,

@@ -6,13 +6,18 @@ defmodule Turbopuffer.Client do
   # Elixir 1.18 ships a JSON module; older versions need Jason.
   @default_json_library if Code.ensure_loaded?(JSON), do: JSON, else: Jason
 
-  defstruct [:api_key, :base_url, :finch_name, :json_library]
+  @retry_statuses [408, 429, 500, 502, 503, 504]
+  @max_retry_delay 30_000
+
+  defstruct [:api_key, :base_url, :finch_name, :json_library, max_retries: 3, retry_delay: 500]
 
   @type t :: %__MODULE__{
           api_key: String.t(),
           base_url: String.t(),
           finch_name: atom(),
-          json_library: module()
+          json_library: module(),
+          max_retries: non_neg_integer(),
+          retry_delay: non_neg_integer()
         }
 
   @type response :: {:ok, map()} | {:error, term()}
@@ -28,6 +33,12 @@ defmodule Turbopuffer.Client do
     * `:finch_name` - Optional. The name of the Finch pool (defaults to Turbopuffer.Finch)
     * `:json_library` - Optional. A module with `encode!/1` and `decode/1`. Defaults to the
       `:json_library` application setting, then to Elixir's `JSON` on 1.18+ and `Jason` before that.
+    * `:max_retries` - Optional. How many times to retry a request that fails with 408, 429, or 5xx,
+      or with a connection error (defaults to 3). turbopuffer returns 429 when writes outpace
+      indexing. Writes are retried too: upserts, patches, and deletes are idempotent, but a conditional
+      write whose first attempt succeeded unseen can be skipped on the retry
+    * `:retry_delay` - Optional. Milliseconds before the first retry, doubling each time with jitter,
+      unless the response sets `retry-after` (defaults to 500)
   """
   @spec new(Turbopuffer.client_opts()) :: t()
   def new(opts) do
@@ -60,7 +71,9 @@ defmodule Turbopuffer.Client do
       api_key: api_key,
       base_url: base_url,
       finch_name: finch_name,
-      json_library: json_library
+      json_library: json_library,
+      max_retries: Keyword.get(opts, :max_retries, 3),
+      retry_delay: Keyword.get(opts, :retry_delay, 500)
     }
   end
 
@@ -98,7 +111,7 @@ defmodule Turbopuffer.Client do
 
     request = Finch.build(method, url, headers, encoded_body)
 
-    with {:ok, response} <- Finch.request(request, client.finch_name, opts),
+    with {:ok, response} <- send_with_retries(client, request, opts, 0),
          {:ok, decoded_body} <- decode_response(response, client.json_library) do
       if response.status in 200..299 do
         {:ok, decoded_body}
@@ -107,6 +120,41 @@ defmodule Turbopuffer.Client do
       end
     end
   end
+
+  defp send_with_retries(client, request, opts, attempt) do
+    result = Finch.request(request, client.finch_name, opts)
+
+    if attempt < client.max_retries and retry?(result) do
+      Process.sleep(retry_delay(result, attempt, client.retry_delay))
+      send_with_retries(client, request, opts, attempt + 1)
+    else
+      result
+    end
+  end
+
+  @doc false
+  def retry?({:ok, %Finch.Response{status: status}}), do: status in @retry_statuses
+  def retry?({:error, %Mint.TransportError{}}), do: true
+  def retry?(_result), do: false
+
+  @doc false
+  def retry_delay(result, attempt, base) do
+    case retry_after(result) do
+      nil -> min(base * Integer.pow(2, attempt) + :rand.uniform(base + 1) - 1, @max_retry_delay)
+      seconds -> min(seconds * 1000, @max_retry_delay)
+    end
+  end
+
+  defp retry_after({:ok, %Finch.Response{headers: headers}}) do
+    with {_, value} <- List.keyfind(headers, "retry-after", 0),
+         {seconds, ""} <- Integer.parse(value) do
+      seconds
+    else
+      _ -> nil
+    end
+  end
+
+  defp retry_after(_result), do: nil
 
   @doc """
   Makes a GET request to the Turbopuffer API.
