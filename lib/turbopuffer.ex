@@ -49,6 +49,8 @@ defmodule Turbopuffer do
           | {:region, :gcp_us_central1 | :gcp_europe_west4 | :gcp_asia_northeast1}
           | {:base_url, String.t()}
           | {:finch_name, atom()}
+          | {:max_retries, non_neg_integer()}
+          | {:retry_delay, non_neg_integer()}
         ]
 
   @type request_opts :: [
