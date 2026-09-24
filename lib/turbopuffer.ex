@@ -93,8 +93,11 @@ defmodule Turbopuffer do
           | {:encryption, map()}
         ]
 
+  @type ann_query :: [float()] | {:embed, String.t()} | {:embed, String.t(), String.t()}
+
   @type vector_query_opts :: [
-          {:vector, [float()]}
+          {:vector, ann_query()}
+          | {:vector_attribute, String.t()}
           | {:top_k, pos_integer()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:include_vectors, boolean()}
@@ -116,7 +119,8 @@ defmodule Turbopuffer do
         ]
 
   @type hybrid_search_opts :: [
-          {:vector, [float()]}
+          {:vector, ann_query()}
+          | {:vector_attribute, String.t()}
           | {:text_query, String.t()}
           | {:text_attribute, String.t()}
           | {:top_k, pos_integer()}
