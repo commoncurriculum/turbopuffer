@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Enhancements
+
+- `multi_query/2` and `hybrid_search/2` take `rerank_by: :rrf` (or `{:rrf, rank_constant: ..., weights: [...]}`) to have turbopuffer fuse the rankings with reciprocal rank fusion, with `:top_k` limiting the fused results. Without it, results are still returned one query after another with duplicate ids removed, which the docs now say instead of "rank fusion"
+
 ## 0.2.0 (2026-02-19)
 
 ### Enhancements
