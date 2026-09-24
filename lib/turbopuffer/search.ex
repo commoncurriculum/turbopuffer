@@ -84,6 +84,7 @@ defmodule Turbopuffer.Search do
     * `:top_k` - Number of results to return (default: 10)
     * `:include_attributes` - List of attributes to include (default: true)
     * `:filters` - Metadata filters to apply
+    * `:rerank_by` - `:rrf` to fuse the two rankings, see `multi_query/2`
 
   ## Examples
 
@@ -124,17 +125,24 @@ defmodule Turbopuffer.Search do
 
     multi_query(namespace,
       queries: queries,
-      top_k: top_k
+      top_k: top_k,
+      rerank_by: Keyword.get(opts, :rerank_by)
     )
   end
 
   @doc """
-  Performs multiple queries with rank fusion.
+  Runs several queries in one request.
+
+  Without `:rerank_by`, returns the queries' rows one query after another, with duplicate ids
+  removed, and each query's own `top_k` applies. With `rerank_by: :rrf`, turbopuffer fuses the
+  rankings with reciprocal rank fusion (https://turbopuffer.com/docs/query#reciprocal-rank-fusion),
+  `:top_k` limits the fused list, and each row's `dist` is its RRF score.
 
   ## Options
     * `:queries` - List of query configurations
-    * `:top_k` - Number of results to return (default: 10)
+    * `:top_k` - Number of fused results to return with `:rerank_by` (default: 10)
     * `:include_attributes` - Attributes to include in results
+    * `:rerank_by` - `:rrf`, or `{:rrf, rank_constant: 60, weights: [2, 1]}` with one weight per query
 
   ## Examples
 
@@ -146,6 +154,13 @@ defmodule Turbopuffer.Search do
       Turbopuffer.Search.multi_query(namespace,
         queries: queries,
         top_k: 20
+      )
+
+      # Fuse the two rankings, weighting the vector search twice as heavily
+      Turbopuffer.Search.multi_query(namespace,
+        queries: queries,
+        top_k: 20,
+        rerank_by: {:rrf, weights: [2, 1]}
       )
   """
   @spec multi_query(Namespace.t(), Turbopuffer.multi_query_opts()) ::
@@ -163,15 +178,16 @@ defmodule Turbopuffer.Search do
         format_query(query, include_attributes)
       end)
 
-    body = %{
-      "queries" => formatted_queries,
-      "top_k" => top_k
-    }
+    # turbopuffer ignores a top-level top_k; a top-level limit caps the fused results.
+    body =
+      case rerank_by(Keyword.get(opts, :rerank_by)) do
+        nil -> %{"queries" => formatted_queries, "top_k" => top_k}
+        rerank_by -> %{"queries" => formatted_queries, "rerank_by" => rerank_by, "limit" => top_k}
+      end
 
     case Client.post(namespace.client, path, body) do
       {:ok, %{"results" => results}} when is_list(results) ->
-        # Multi-query returns results array, each with its own rows
-        # We need to merge/deduplicate the rows from all query results
+        # One result per query, or a single fused result with rerank_by
         all_rows =
           results
           |> Enum.flat_map(fn %{"rows" => rows} -> rows || [] end)
@@ -191,6 +207,24 @@ defmodule Turbopuffer.Search do
       error ->
         error
     end
+  end
+
+  defp rerank_by(nil), do: nil
+  defp rerank_by(:rrf), do: ["RRF"]
+
+  defp rerank_by({:rrf, params}) when is_list(params) do
+    case Keyword.keys(params) -- [:rank_constant, :weights] do
+      [] ->
+        ["RRF", Map.new(params, fn {key, value} -> {Atom.to_string(key), value} end)]
+
+      unknown ->
+        raise ArgumentError,
+              "unknown RRF option(s) #{inspect(unknown)}, expected :rank_constant or :weights"
+    end
+  end
+
+  defp rerank_by(other) do
+    raise ArgumentError, "invalid :rerank_by #{inspect(other)}, expected :rrf or {:rrf, keyword}"
   end
 
   defp format_query(%{rank_by: rank_by} = query, include_attributes) do
