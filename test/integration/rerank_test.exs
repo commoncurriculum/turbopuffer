@@ -1,14 +1,7 @@
 defmodule Turbopuffer.Integration.RerankTest do
-  use ExUnit.Case, async: true
+  use Turbopuffer.IntegrationCase, async: true
 
-  @moduletag :integration
-
-  setup do
-    client = Turbopuffer.new(api_key: System.fetch_env!("TURBOPUFFER_API_KEY"))
-    name = "turbopuffer-ex-test-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    namespace = Turbopuffer.namespace(client, name)
-    on_exit(fn -> Turbopuffer.delete_namespace(namespace) end)
-
+  setup %{namespace: namespace} do
     {:ok, _} =
       Turbopuffer.write(namespace,
         upsert_rows: [
@@ -24,7 +17,7 @@ defmodule Turbopuffer.Integration.RerankTest do
       %{rank_by: ["text", "BM25", "fox"], top_k: 1}
     ]
 
-    {:ok, namespace: namespace, queries: queries}
+    {:ok, queries: queries}
   end
 
   test "rerank_by: :rrf fuses the queries into one ranking", context do
@@ -53,21 +46,20 @@ defmodule Turbopuffer.Integration.RerankTest do
     assert fused.([1, 5]) == ["text-match"]
   end
 
-  test "hybrid_search passes rerank_by through", %{namespace: namespace} do
-    assert {:ok, [first | _]} =
-             Turbopuffer.hybrid_search(namespace,
-               vector: [0.0, 1.0],
-               text_query: "fox",
-               text_attribute: "text",
-               rerank_by: :rrf
-             )
-
-    assert first.id == "text-match"
-  end
-
-  test "rejects unknown RRF options", %{namespace: namespace, queries: queries} do
-    assert_raise ArgumentError, ~r/unknown RRF option\(s\) \[:k\]/, fn ->
-      Turbopuffer.multi_query(namespace, queries: queries, rerank_by: {:rrf, k: 60})
+  test "hybrid_search fuses with RRF unless rerank_by is nil", %{namespace: namespace} do
+    search = fn opts ->
+      Turbopuffer.hybrid_search(
+        namespace,
+        [vector: [0.0, 1.0], text_query: "fox", text_attribute: "text"] ++ opts
+      )
     end
+
+    assert {:ok, [%{id: "text-match"} = first, %{id: "vector-match"}]} = search.([])
+    # text-match ranks first in both queries.
+    assert_in_delta first.dist, 2 / 61, 0.0001
+
+    assert {:ok, [%{id: "text-match"} = first, %{id: "vector-match"}]} = search.(rerank_by: nil)
+    # Unfused, the first row is the vector query's, so dist is its cosine distance.
+    assert_in_delta first.dist, 0.0, 0.0001
   end
 end

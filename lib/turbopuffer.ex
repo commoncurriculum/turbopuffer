@@ -135,7 +135,7 @@ defmodule Turbopuffer do
           | {:top_k, pos_integer()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:filters, filters()}
-          | {:rerank_by, rerank_by()}
+          | {:rerank_by, rerank_by() | nil}
         ]
 
   @type rerank_by ::
@@ -257,13 +257,16 @@ defmodule Turbopuffer do
   defdelegate text_search(namespace, opts), to: Search, as: :text
 
   @doc """
-  Performs hybrid search combining vector and text.
+  Performs hybrid search combining vector and text, fused with reciprocal rank fusion.
+  See `Turbopuffer.Search.hybrid/2`.
 
   ## Options
     * `:vector` - The query vector
     * `:text_query` - The text query
     * `:text_attribute` - The attribute for text search
     * `:top_k` - Number of results (default: 10)
+    * `:rerank_by` - How to fuse the two rankings (default: `:rrf`). `nil` returns the vector rows,
+      then the text rows, unfused
 
   ## Examples
 
