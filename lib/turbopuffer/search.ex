@@ -72,6 +72,9 @@ defmodule Turbopuffer.Search do
   @doc """
   Performs a hybrid search combining vector and text search.
 
+  turbopuffer fuses the vector and BM25 rankings with reciprocal rank fusion, so the results are
+  one ranking of at most `:top_k` rows, and each row's `dist` is its RRF score.
+
   ## Options
     * `:vector` - The query vector (required)
     * `:text_query` - The text query string (required)
@@ -79,7 +82,9 @@ defmodule Turbopuffer.Search do
     * `:top_k` - Number of results to return (default: 10)
     * `:include_attributes` - List of attributes to include (default: true)
     * `:filters` - Metadata filters to apply
-    * `:rerank_by` - `:rrf` to fuse the two rankings, see `multi_query/2`
+    * `:rerank_by` - How to fuse the two rankings (default: `:rrf`), see `multi_query/2`. `nil`
+      returns up to `:top_k` vector rows followed by up to `:top_k` BM25 rows, with duplicate ids
+      removed
 
   ## Examples
 
@@ -120,7 +125,7 @@ defmodule Turbopuffer.Search do
     multi_query(namespace,
       queries: queries,
       top_k: top_k,
-      rerank_by: Keyword.get(opts, :rerank_by)
+      rerank_by: Keyword.get(opts, :rerank_by, :rrf)
     )
   end
 

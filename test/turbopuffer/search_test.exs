@@ -73,18 +73,45 @@ defmodule Turbopuffer.SearchTest do
   end
 
   describe "hybrid_search/2" do
-    test "passes rerank_by through", %{bypass: bypass, namespace: ns} do
+    @hybrid [vector: [1.0, 0.0], text_query: "fox", text_attribute: "text"]
+
+    test "fuses the two rankings with RRF by default", %{bypass: bypass, namespace: ns} do
+      expect_query(bypass, %{"results" => [%{"rows" => [%{"id" => "b"}, %{"id" => "a"}]}]})
+
+      assert {:ok, [%{id: "b"}, %{id: "a"}]} =
+               Turbopuffer.hybrid_search(ns, @hybrid ++ [top_k: 5])
+
+      assert_received {:body, body}
+      assert body["rerank_by"] == ["RRF"]
+      assert body["limit"] == 5
+
+      assert [ann, bm25] = body["queries"]
+      assert ann["rank_by"] == ["vector", "ANN", [1.0, 0.0]]
+      assert bm25["rank_by"] == ["text", "BM25", "fox"]
+    end
+
+    test "passes RRF options through", %{bypass: bypass, namespace: ns} do
       expect_query(bypass, %{"results" => [%{"rows" => []}]})
 
       assert {:ok, []} =
-               Turbopuffer.hybrid_search(ns,
-                 vector: [1.0, 0.0],
-                 text_query: "fox",
-                 text_attribute: "text",
-                 rerank_by: :rrf
-               )
+               Turbopuffer.hybrid_search(ns, @hybrid ++ [rerank_by: {:rrf, weights: [2, 1]}])
 
-      assert_received {:body, %{"rerank_by" => ["RRF"], "queries" => [_, _]}}
+      assert_received {:body, %{"rerank_by" => ["RRF", %{"weights" => [2, 1]}]}}
+    end
+
+    test "rerank_by: nil returns the rows unfused", %{bypass: bypass, namespace: ns} do
+      expect_query(bypass, %{
+        "results" => [
+          %{"rows" => [%{"id" => "a"}, %{"id" => "b"}]},
+          %{"rows" => [%{"id" => "b"}, %{"id" => "c"}]}
+        ]
+      })
+
+      assert {:ok, [%{id: "a"}, %{id: "b"}, %{id: "c"}]} =
+               Turbopuffer.hybrid_search(ns, @hybrid ++ [rerank_by: nil])
+
+      assert_received {:body, body}
+      assert Map.keys(body) == ["queries"]
     end
   end
 end

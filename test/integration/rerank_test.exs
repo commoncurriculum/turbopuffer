@@ -46,15 +46,20 @@ defmodule Turbopuffer.Integration.RerankTest do
     assert fused.([1, 5]) == ["text-match"]
   end
 
-  test "hybrid_search passes rerank_by through", %{namespace: namespace} do
-    assert {:ok, [first | _]} =
-             Turbopuffer.hybrid_search(namespace,
-               vector: [0.0, 1.0],
-               text_query: "fox",
-               text_attribute: "text",
-               rerank_by: :rrf
-             )
+  test "hybrid_search fuses with RRF unless rerank_by is nil", %{namespace: namespace} do
+    search = fn opts ->
+      Turbopuffer.hybrid_search(
+        namespace,
+        [vector: [0.0, 1.0], text_query: "fox", text_attribute: "text"] ++ opts
+      )
+    end
 
-    assert first.id == "text-match"
+    assert {:ok, [%{id: "text-match"} = first, %{id: "vector-match"}]} = search.([])
+    # text-match ranks first in both queries.
+    assert_in_delta first.dist, 2 / 61, 0.0001
+
+    assert {:ok, [%{id: "text-match"} = first, %{id: "vector-match"}]} = search.(rerank_by: nil)
+    # Unfused, the first row is the vector query's, so dist is its cosine distance.
+    assert_in_delta first.dist, 0.0, 0.0001
   end
 end
