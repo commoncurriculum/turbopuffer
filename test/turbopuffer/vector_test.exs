@@ -42,19 +42,19 @@ defmodule Turbopuffer.VectorTest do
 
   describe "unknown options" do
     test "raise instead of being dropped", %{namespace: namespace} do
-      assert_raise ArgumentError, ~r/\[:upsert_conditon\] for Turbopuffer.write\/2/, fn ->
+      assert_raise ArgumentError, ~r/unknown keys \[:upsert_conditon\]/, fn ->
         Vector.write(namespace, upsert_rows: [%{id: 1}], upsert_conditon: ["id", "Eq", nil])
       end
 
-      assert_raise ArgumentError, ~r/\[:limit\] for Turbopuffer.query\/2/, fn ->
+      assert_raise ArgumentError, ~r/unknown keys \[:limit\]/, fn ->
         Vector.query(namespace, vector: [0.1], limit: 5)
       end
 
-      assert_raise ArgumentError, ~r/\[:text\] for Turbopuffer.text_search\/2/, fn ->
+      assert_raise ArgumentError, ~r/unknown keys \[:text\]/, fn ->
         Turbopuffer.text_search(namespace, query: "q", attribute: "a", text: "q")
       end
 
-      assert_raise ArgumentError, ~r/\[:k\] for Turbopuffer.hybrid_search\/2/, fn ->
+      assert_raise ArgumentError, ~r/unknown keys \[:k\]/, fn ->
         Turbopuffer.hybrid_search(namespace,
           vector: [0.1],
           text_query: "q",
@@ -63,15 +63,53 @@ defmodule Turbopuffer.VectorTest do
         )
       end
 
-      assert_raise ArgumentError, ~r/\[:rerank\] for Turbopuffer.multi_query\/2/, fn ->
+      assert_raise ArgumentError, ~r/unknown keys \[:rerank\]/, fn ->
         Turbopuffer.multi_query(namespace, queries: [], rerank: true)
       end
     end
 
     test "raise for options that aren't a keyword list", %{namespace: namespace} do
-      assert_raise ArgumentError, ~r/Turbopuffer.write\/2 expects a keyword list/, fn ->
+      assert_raise ArgumentError, ~r/expected a keyword list/, fn ->
         Vector.write(namespace, [%{id: "doc1", vector: [0.1]}])
       end
+    end
+  end
+
+  describe "write body" do
+    test "sends every option under its own name and skips unset ones" do
+      bypass = Bypass.open()
+      test_pid = self()
+
+      Bypass.expect_once(bypass, "POST", "/v2/namespaces/test-ns", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        send(test_pid, {:body, JSON.decode!(body)})
+        Plug.Conn.resp(conn, 200, "{}")
+      end)
+
+      client = Client.new(api_key: "test-key", base_url: "http://localhost:#{bypass.port}")
+
+      assert {:ok, %{}} =
+               Vector.write(Namespace.new(client, "test-ns"),
+                 upsert_rows: [%{id: "a", vector: [0.1], attributes: %{"color" => "red"}}],
+                 patch_rows: [],
+                 deletes: [],
+                 schema: nil,
+                 distance_metric: "cosine_distance",
+                 patch_by_filter: %{filters: ["color", "Eq", "blue"], patch: %{color: "green"}},
+                 return_affected_ids: false
+               )
+
+      assert_received {:body, body}
+
+      assert body == %{
+               "upsert_rows" => [%{"id" => "a", "vector" => [0.1], "color" => "red"}],
+               "distance_metric" => "cosine_distance",
+               "patch_by_filter" => %{
+                 "filters" => ["color", "Eq", "blue"],
+                 "patch" => %{"color" => "green"}
+               },
+               "return_affected_ids" => false
+             }
     end
   end
 

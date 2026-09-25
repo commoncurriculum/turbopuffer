@@ -91,6 +91,13 @@ defmodule Turbopuffer do
           | {:delete_by_filter, map()}
           | {:copy_from_namespace, String.t()}
           | {:encryption, map()}
+          | {:patch_by_filter, map()}
+          | {:patch_by_filter_allow_partial, boolean()}
+          | {:delete_by_filter_allow_partial, boolean()}
+          | {:return_affected_ids, boolean()}
+          | {:branch_from_namespace, String.t()}
+          | {:sharding, map()}
+          | {:disable_backpressure, boolean()}
         ]
 
   @type vector_query_opts :: [
@@ -169,6 +176,8 @@ defmodule Turbopuffer do
     * `:deletes` - List of IDs to delete
     * `:distance_metric` - The distance metric to use (e.g., "cosine_distance", "euclidean_squared")
     * `:schema` - Schema configuration for attributes
+
+  `Turbopuffer.Vector.write/2` lists every option. Unknown options raise `ArgumentError`.
 
   ## Examples
 
