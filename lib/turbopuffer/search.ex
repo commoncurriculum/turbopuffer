@@ -55,7 +55,8 @@ defmodule Turbopuffer.Search do
     base_body = %{
       "rank_by" => [attribute, "BM25", query],
       "top_k" => Keyword.get(opts, :top_k, 10),
-      "include_attributes" => Query.normalize_include_attributes(Keyword.get(opts, :include_attributes, true))
+      "include_attributes" =>
+        Query.normalize_include_attributes(Keyword.get(opts, :include_attributes, true))
     }
 
     case Keyword.get(opts, :filters) do
@@ -224,7 +225,10 @@ defmodule Turbopuffer.Search do
     base_query = %{
       "rank_by" => format_rank_by(rank_by),
       "top_k" => Map.get(query, :top_k, 10),
-      "include_attributes" => Query.normalize_include_attributes(Map.get(query, :include_attributes, include_attributes))
+      "include_attributes" =>
+        Query.normalize_include_attributes(
+          Map.get(query, :include_attributes, include_attributes)
+        )
     }
 
     case Map.get(query, :filters) do

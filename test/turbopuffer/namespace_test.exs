@@ -13,6 +13,7 @@ defmodule Turbopuffer.NamespaceTest do
     test "sends GET to /v1/namespaces with no query params", %{client: client, bypass: bypass} do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         assert conn.query_string == ""
+
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, Jason.encode!(%{"namespaces" => ["ns-a", "ns-b"]}))
@@ -25,6 +26,7 @@ defmodule Turbopuffer.NamespaceTest do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         params = URI.decode_query(conn.query_string)
         assert params["prefix"] == "prod-"
+
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, Jason.encode!(%{"namespaces" => ["prod-a"]}))
@@ -39,12 +41,16 @@ defmodule Turbopuffer.NamespaceTest do
         params = URI.decode_query(conn.query_string)
         assert params["page_size"] == "25"
         assert params["cursor"] == "abc123"
+
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "namespaces" => ["ns-1", "ns-2"],
-          "next_cursor" => "def456"
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "namespaces" => ["ns-1", "ns-2"],
+            "next_cursor" => "def456"
+          })
+        )
       end)
 
       assert {:ok, %{namespaces: ["ns-1", "ns-2"], next_cursor: "def456"}} =
@@ -55,16 +61,22 @@ defmodule Turbopuffer.NamespaceTest do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "namespaces" => ["ns-1"],
-          "next_cursor" => "cursor-xyz"
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "namespaces" => ["ns-1"],
+            "next_cursor" => "cursor-xyz"
+          })
+        )
       end)
 
       assert {:ok, %{namespaces: ["ns-1"], next_cursor: "cursor-xyz"}} = Namespace.list(client)
     end
 
-    test "returns empty list when no namespaces key in response", %{client: client, bypass: bypass} do
+    test "returns empty list when no namespaces key in response", %{
+      client: client,
+      bypass: bypass
+    } do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
@@ -87,6 +99,7 @@ defmodule Turbopuffer.NamespaceTest do
     test "ignores unknown options", %{client: client, bypass: bypass} do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         assert conn.query_string == ""
+
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, Jason.encode!(%{"namespaces" => []}))

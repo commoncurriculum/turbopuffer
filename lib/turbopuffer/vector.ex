@@ -236,31 +236,37 @@ defmodule Turbopuffer.Vector do
   defp add_query_option({:include_vectors, _}, acc), do: acc
 
   defp add_query_option({:filters, nil}, acc), do: acc
+
   defp add_query_option({:filters, filters}, acc) do
     Map.put(acc, "filters", Query.format_filters(filters))
   end
 
   defp add_query_option({:exclude_attributes, nil}, acc), do: acc
+
   defp add_query_option({:exclude_attributes, attrs}, acc) do
     Map.put(acc, "exclude_attributes", attrs)
   end
 
   defp add_query_option({:aggregate_by, nil}, acc), do: acc
+
   defp add_query_option({:aggregate_by, agg}, acc) do
     Map.put(acc, "aggregate_by", agg)
   end
 
   defp add_query_option({:group_by, nil}, acc), do: acc
+
   defp add_query_option({:group_by, groups}, acc) do
     Map.put(acc, "group_by", groups)
   end
 
   defp add_query_option({:vector_encoding, nil}, acc), do: acc
+
   defp add_query_option({:vector_encoding, encoding}, acc) do
     Map.put(acc, "vector_encoding", format_encoding(encoding))
   end
 
   defp add_query_option({:consistency, nil}, acc), do: acc
+
   defp add_query_option({:consistency, consistency}, acc) do
     Map.put(acc, "consistency", format_consistency(consistency))
   end

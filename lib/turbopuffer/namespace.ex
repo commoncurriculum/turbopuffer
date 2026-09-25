@@ -54,10 +54,17 @@ defmodule Turbopuffer.Namespace do
     query_params =
       opts
       |> Enum.reduce([], fn
-        {:prefix, value}, acc when is_binary(value) -> [{"prefix", value} | acc]
-        {:page_size, value}, acc when is_integer(value) -> [{"page_size", Integer.to_string(value)} | acc]
-        {:cursor, value}, acc when is_binary(value) -> [{"cursor", value} | acc]
-        _, acc -> acc
+        {:prefix, value}, acc when is_binary(value) ->
+          [{"prefix", value} | acc]
+
+        {:page_size, value}, acc when is_integer(value) ->
+          [{"page_size", Integer.to_string(value)} | acc]
+
+        {:cursor, value}, acc when is_binary(value) ->
+          [{"cursor", value} | acc]
+
+        _, acc ->
+          acc
       end)
 
     query_string = URI.encode_query(query_params)

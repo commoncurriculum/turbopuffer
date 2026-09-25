@@ -86,5 +86,4 @@ defmodule TurbopufferTest do
       assert %Turbopuffer.Namespace{name: "test-ns"} = namespace
     end
   end
-
 end
