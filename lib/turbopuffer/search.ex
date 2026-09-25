@@ -171,10 +171,11 @@ defmodule Turbopuffer.Search do
         format_query(query, include_attributes)
       end)
 
-    # turbopuffer ignores a top-level top_k; a top-level limit caps the fused results.
+    # turbopuffer ignores a top-level top_k, so each query's own top_k applies. A top-level limit
+    # caps the fused list that rerank_by returns.
     body =
       case rerank_by(Keyword.get(opts, :rerank_by)) do
-        nil -> %{"queries" => formatted_queries, "top_k" => top_k}
+        nil -> %{"queries" => formatted_queries}
         rerank_by -> %{"queries" => formatted_queries, "rerank_by" => rerank_by, "limit" => top_k}
       end
 
@@ -206,14 +207,8 @@ defmodule Turbopuffer.Search do
   defp rerank_by(:rrf), do: ["RRF"]
 
   defp rerank_by({:rrf, params}) when is_list(params) do
-    case Keyword.keys(params) -- [:rank_constant, :weights] do
-      [] ->
-        ["RRF", Map.new(params, fn {key, value} -> {Atom.to_string(key), value} end)]
-
-      unknown ->
-        raise ArgumentError,
-              "unknown RRF option(s) #{inspect(unknown)}, expected :rank_constant or :weights"
-    end
+    params = Keyword.validate!(params, [:rank_constant, :weights])
+    ["RRF", Map.new(params, fn {key, value} -> {Atom.to_string(key), value} end)]
   end
 
   defp rerank_by(other) do

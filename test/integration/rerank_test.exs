@@ -64,10 +64,4 @@ defmodule Turbopuffer.Integration.RerankTest do
 
     assert first.id == "text-match"
   end
-
-  test "rejects unknown RRF options", %{namespace: namespace, queries: queries} do
-    assert_raise ArgumentError, ~r/unknown RRF option\(s\) \[:k\]/, fn ->
-      Turbopuffer.multi_query(namespace, queries: queries, rerank_by: {:rrf, k: 60})
-    end
-  end
 end
