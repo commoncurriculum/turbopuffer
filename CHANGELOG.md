@@ -4,7 +4,7 @@
 
 ### Enhancements
 
-- Support Elixir 1.15+: the JSON library is configurable with the `:json_library` client option or application setting, defaulting to Elixir's `JSON` on 1.18+ and `Jason` before that
+- Support Elixir 1.15+: the client uses Elixir's `JSON` on 1.18+ and `Jason` before that, or the module set with `config :turbopuffer, :json_library, ...`
 
 ## 0.2.0 (2026-02-19)
 

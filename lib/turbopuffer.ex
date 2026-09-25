@@ -49,7 +49,6 @@ defmodule Turbopuffer do
           | {:region, :gcp_us_central1 | :gcp_europe_west4 | :gcp_asia_northeast1}
           | {:base_url, String.t()}
           | {:finch_name, atom()}
-          | {:json_library, module()}
         ]
 
   @type request_opts :: [

@@ -2,11 +2,6 @@ defmodule TurbopufferTest do
   use ExUnit.Case
   doctest Turbopuffer
 
-  defmodule CustomJSON do
-    def encode!(term), do: Jason.encode!(term)
-    def decode(binary), do: Jason.decode(binary)
-  end
-
   describe "client creation" do
     test "creates client with API key" do
       client = Turbopuffer.new(api_key: "test-key")
@@ -35,33 +30,23 @@ defmodule TurbopufferTest do
     end
   end
 
-  describe "JSON library" do
-    test "defaults to Elixir's JSON when it exists, and Jason otherwise" do
-      expected = if Code.ensure_loaded?(JSON), do: JSON, else: Jason
-      assert Turbopuffer.new(api_key: "test-key").json_library == expected
-    end
+  describe "JSON" do
+    test "encodes request bodies and decodes responses" do
+      bypass = Bypass.open()
 
-    test "comes from the :json_library option, then the application setting" do
-      Application.put_env(:turbopuffer, :json_library, Jason)
-      on_exit(fn -> Application.delete_env(:turbopuffer, :json_library) end)
+      Bypass.expect_once(bypass, "POST", "/v2/namespaces/ns", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(body) == %{"deletes" => ["a"]}
 
-      assert Turbopuffer.new(api_key: "test-key").json_library == Jason
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"status": "OK", "rows_deleted": 1}))
+      end)
 
-      assert Turbopuffer.new(api_key: "test-key", json_library: __MODULE__.CustomJSON).json_library ==
-               __MODULE__.CustomJSON
-    end
+      client = Turbopuffer.new(api_key: "test-key", base_url: "http://localhost:#{bypass.port}")
 
-    test "raises when the library isn't available" do
-      assert_raise ArgumentError, ~r/JSON library NoSuchJSON is not available/, fn ->
-        Turbopuffer.new(api_key: "test-key", json_library: NoSuchJSON)
-      end
-    end
-
-    test "decodes turbopuffer's responses with the configured library" do
-      client = Turbopuffer.new(api_key: "not-a-real-key", json_library: Jason)
-
-      assert {:error, {:http_error, 401, %{"status" => "error", "error" => _}}} =
-               Turbopuffer.list_namespaces(client)
+      assert {:ok, %{"status" => "OK", "rows_deleted" => 1}} =
+               Turbopuffer.write(Turbopuffer.namespace(client, "ns"), deletes: ["a"])
     end
   end
 
