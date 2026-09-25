@@ -53,9 +53,11 @@ defmodule Turbopuffer do
           | {:retry_delay, non_neg_integer()}
         ]
 
+  # Passed to Finch.request/3, see Turbopuffer.Client.request/5
   @type request_opts :: [
-          {:timeout, pos_integer()}
-          | {:receive_timeout, pos_integer()}
+          {:pool_timeout, timeout()}
+          | {:receive_timeout, timeout()}
+          | {:request_timeout, timeout()}
         ]
 
   # Filter types

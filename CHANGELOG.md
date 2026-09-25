@@ -11,6 +11,10 @@
 - `query/2` and `hybrid_search/2` take `:vector_attribute` to search a vector attribute not named `vector`, and accept `{:embed, text}` or `{:embed, text, model}` as `:vector` to use turbopuffer's native embedding. `:include_vectors` returns `:vector_attribute`, so it raises with `{:embed, ...}`, whose vector lives in an attribute only the schema names
 - Retry requests that fail with 408, 429, or 5xx, or with a connection error, up to `:max_retries` times (default 3) with exponential backoff and jitter from `:retry_delay` (default 500ms), following `retry-after` when turbopuffer sends it. turbopuffer returns 429 when writes outpace indexing
 
+### Bug fixes
+
+- `Turbopuffer.request_opts` and the `Turbopuffer.Client` request docs list the options Finch takes: `:pool_timeout`, `:receive_timeout`, and `:request_timeout`. They listed `:timeout`, which Finch ignored before 0.22 and rejects with an `ArgumentError` from 0.22 on
+
 ### Breaking changes
 
 - `write/2`, `query/2`, `text_search/2`, `hybrid_search/2`, and `multi_query/2` raise `ArgumentError` for unknown or repeated options instead of dropping them, so a typo like `upsert_conditon:` no longer turns a conditional write into an unconditional one
