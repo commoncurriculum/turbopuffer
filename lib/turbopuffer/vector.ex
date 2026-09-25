@@ -34,10 +34,8 @@ defmodule Turbopuffer.Vector do
     :top_k,
     :include_attributes,
     :include_vectors,
-    :filters,
     :exclude_attributes,
-    :aggregate_by,
-    :group_by,
+    :filters,
     :vector_encoding,
     :consistency
   ]
@@ -57,7 +55,9 @@ defmodule Turbopuffer.Vector do
     * `:upsert_condition` - Conditional upsert based on existing state
     * `:patch_condition` - Conditional patch
     * `:delete_condition` - Conditional delete
-    * `:copy_from_namespace` - Copy all documents from another namespace
+    * `:copy_from_namespace` - Copy all documents from another namespace, given by name or as
+      `%{source_namespace: ..., source_region: ..., source_api_key: ...}`. Waits for the copy to
+      finish, which turbopuffer may run in the background
     * `:encryption` - Customer managed encryption configuration
     * `:patch_by_filter` - `%{filters: ..., patch: ...}` to patch every document matching a filter
     * `:patch_by_filter_allow_partial`, `:delete_by_filter_allow_partial` - Let filter writes stop at
@@ -114,7 +114,9 @@ defmodule Turbopuffer.Vector do
       |> Enum.flat_map(&write_field/1)
       |> Map.new()
 
-    Client.post(namespace.client, path, body)
+    Client.post(namespace.client, path, body,
+      respond_async: Map.has_key?(body, "copy_from_namespace")
+    )
   end
 
   defp write_field({_key, nil}), do: []
@@ -134,16 +136,18 @@ defmodule Turbopuffer.Vector do
     * `:vector_attribute` - The attribute to search (default: "vector"). For native embedding, the
       string attribute that has `embed` in the schema
     * `:top_k` - Number of results to return (default: 10)
-    * `:include_attributes` - List of attributes to include in results, or `true` for all (default: true)
-    * `:filters` - Metadata filters to apply as a map
-    * `:include_vectors` - Whether to include `:vector_attribute` in results (default: false). Not
-      allowed with `{:embed, ...}`, whose vector attribute only the schema knows: list it in
-      `:include_attributes` instead
-    * `:exclude_attributes` - List of attributes to exclude from results
-    * `:aggregate_by` - Aggregation configuration
-    * `:group_by` - Attributes to group aggregations by
-    * `:vector_encoding` - Vector encoding format (:float or :base64)
-    * `:consistency` - Read consistency (:strong or :eventual)
+    * `:include_attributes` - List of attributes to include in results, `true` or `:all` for all of
+      them, or `false` for none (default: true)
+    * `:include_vectors` - Whether to include `:vector_attribute` in results, as each result's
+      `vector` (default: false). Not allowed with `{:embed, ...}`, whose vector attribute only the
+      schema knows: list it in `:include_attributes` instead
+    * `:exclude_attributes` - List of attributes to leave out of the results, instead of
+      `:include_attributes`
+    * `:filters` - A map of attribute values to match, or a turbopuffer filter like
+      `["price", "Gte", 10]`
+    * `:vector_encoding` - `:float` (the default), or `:base64` to return each vector as
+      turbopuffer's base64 string of its little-endian elements, in the attribute's own element type
+    * `:consistency` - `:strong` (the default) or `:eventual`
 
   Unknown options raise `ArgumentError`.
 
@@ -182,96 +186,80 @@ defmodule Turbopuffer.Vector do
     Keyword.validate!(opts, @query_options)
     vector = Keyword.fetch!(opts, :vector)
     vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
-    path = "/v2/namespaces/#{namespace.name}/query"
 
     body =
-      opts
-      |> build_query_body(vector, vector_attribute)
+      %{
+        "rank_by" => RankBy.ann(vector_attribute, vector),
+        "top_k" => Keyword.get(opts, :top_k, 10)
+      }
+      |> Map.merge(attributes(opts, vector, vector_attribute))
+      |> Query.put_filters(opts[:filters])
+      |> put_option("vector_encoding", opts[:vector_encoding], &encoding/1)
+      |> Query.put_consistency(opts[:consistency])
 
     namespace.client
-    |> Client.post(path, body)
-    |> Query.results()
+    |> Client.post("/v2/namespaces/#{namespace.name}/query", body)
+    |> Query.results(if is_list(vector), do: vector_attribute)
   end
 
-  # Build query body from options using pattern matching
-  defp build_query_body(opts, vector, vector_attribute) do
-    base_body = %{
-      "rank_by" => RankBy.ann(vector_attribute, vector),
-      "top_k" => Keyword.get(opts, :top_k, 10),
-      "include_attributes" => process_include_attributes(opts, vector, vector_attribute)
-    }
-
-    opts
-    |> Enum.reduce(base_body, &add_query_option/2)
-  end
-
-  defp process_include_attributes(opts, vector, vector_attribute) do
-    include_attributes = Keyword.get(opts, :include_attributes, true)
+  # turbopuffer's include_attributes: true returns vectors too, so leaving them out takes
+  # exclude_attributes, which turbopuffer won't take alongside include_attributes.
+  defp attributes(opts, vector, vector_attribute) do
+    include = Query.normalize_include_attributes(Keyword.get(opts, :include_attributes, true))
     include_vectors = Keyword.get(opts, :include_vectors, false)
+    exclude = Keyword.get(opts, :exclude_attributes)
 
-    # A natively embedded string attribute keeps its vector under another name, which only the
-    # namespace's schema knows.
-    if include_vectors == true and not is_list(vector) do
+    if include_vectors and not is_list(vector) do
       raise ArgumentError,
             "include_vectors can't tell which attribute holds the vector for #{inspect(vector)}, " <>
               "so add that attribute to :include_attributes instead"
     end
 
-    # Normalize :all to true
-    include_attributes = Query.normalize_include_attributes(include_attributes)
+    if exclude && Keyword.has_key?(opts, :include_attributes) do
+      raise ArgumentError,
+            "turbopuffer takes :include_attributes or :exclude_attributes, not both"
+    end
 
-    case {include_attributes, include_vectors} do
-      {true, true} -> [vector_attribute]
-      {true, false} -> true
-      {attrs, true} when is_list(attrs) -> [vector_attribute | attrs] |> Enum.uniq()
-      {attrs, false} -> attrs
-      _ -> include_attributes
+    case include do
+      true when include_vectors and is_list(exclude) ->
+        %{"exclude_attributes" => exclude -- [vector_attribute]}
+
+      true when include_vectors ->
+        %{"include_attributes" => true}
+
+      # The vector of an embedded query lives in an attribute only the schema names.
+      true when is_list(vector) ->
+        %{"exclude_attributes" => Enum.uniq([vector_attribute | exclude || []])}
+
+      true when is_list(exclude) ->
+        %{"exclude_attributes" => exclude}
+
+      true ->
+        %{"include_attributes" => true}
+
+      false when include_vectors ->
+        %{"include_attributes" => [vector_attribute]}
+
+      false ->
+        %{"include_attributes" => false}
+
+      attributes when include_vectors ->
+        %{"include_attributes" => Enum.uniq([vector_attribute | attributes])}
+
+      attributes ->
+        %{"include_attributes" => attributes}
     end
   end
 
-  # Pattern match on query options
-  defp add_query_option({:vector, _}, acc), do: acc
-  defp add_query_option({:top_k, _}, acc), do: acc
-  defp add_query_option({:include_attributes, _}, acc), do: acc
-  defp add_query_option({:include_vectors, _}, acc), do: acc
+  defp put_option(body, _key, nil, _format), do: body
+  defp put_option(body, key, value, format), do: Map.put(body, key, format.(value))
 
-  defp add_query_option({:filters, nil}, acc), do: acc
+  defp encoding(:float), do: "float"
+  defp encoding(:base64), do: "base64"
 
-  defp add_query_option({:filters, filters}, acc) do
-    Map.put(acc, "filters", Query.format_filters(filters))
+  defp encoding(other) do
+    raise ArgumentError, "invalid :vector_encoding #{inspect(other)}, expected :float or :base64"
   end
-
-  defp add_query_option({:exclude_attributes, nil}, acc), do: acc
-
-  defp add_query_option({:exclude_attributes, attrs}, acc) do
-    Map.put(acc, "exclude_attributes", attrs)
-  end
-
-  defp add_query_option({:aggregate_by, nil}, acc), do: acc
-
-  defp add_query_option({:aggregate_by, agg}, acc) do
-    Map.put(acc, "aggregate_by", agg)
-  end
-
-  defp add_query_option({:group_by, nil}, acc), do: acc
-
-  defp add_query_option({:group_by, groups}, acc) do
-    Map.put(acc, "group_by", groups)
-  end
-
-  defp add_query_option({:vector_encoding, nil}, acc), do: acc
-
-  defp add_query_option({:vector_encoding, encoding}, acc) do
-    Map.put(acc, "vector_encoding", format_encoding(encoding))
-  end
-
-  defp add_query_option({:consistency, nil}, acc), do: acc
-
-  defp add_query_option({:consistency, consistency}, acc) do
-    Map.put(acc, "consistency", format_consistency(consistency))
-  end
-
-  defp add_query_option(_, acc), do: acc
 
   # Format vectors for write operations - attributes are flattened
   defp format_write_vectors(vectors) do
@@ -298,14 +286,4 @@ defmodule Turbopuffer.Vector do
       |> Map.merge(base)
     end
   end
-
-  defp format_encoding(nil), do: nil
-  defp format_encoding(:float), do: "float"
-  defp format_encoding(:base64), do: "base64"
-  defp format_encoding(other), do: other
-
-  defp format_consistency(nil), do: nil
-  defp format_consistency(:strong), do: "strong"
-  defp format_consistency(:eventual), do: "eventual"
-  defp format_consistency(other), do: other
 end

@@ -31,14 +31,27 @@ defmodule Turbopuffer.Query do
 
   def format_filters(filters), do: filters
 
-  @spec results(Client.response()) :: {:ok, Turbopuffer.query_response()} | {:error, term()}
-  def results({:ok, %{"rows" => rows}}) when is_list(rows), do: {:ok, Result.from_maps(rows)}
+  @spec put_filters(map(), Turbopuffer.filters() | list() | nil) :: map()
+  def put_filters(body, nil), do: body
+  def put_filters(body, filters), do: Map.put(body, "filters", format_filters(filters))
 
-  def results({:ok, %{"vectors" => vectors}}) when is_list(vectors) do
-    {:ok, Result.from_maps(vectors)}
+  @spec put_consistency(map(), :strong | :eventual | nil) :: map()
+  def put_consistency(body, nil), do: body
+
+  def put_consistency(body, level) when level in [:strong, :eventual],
+    do: Map.put(body, "consistency", %{"level" => Atom.to_string(level)})
+
+  def put_consistency(_body, level) do
+    raise ArgumentError, "invalid :consistency #{inspect(level)}, expected :strong or :eventual"
   end
 
-  def results({:ok, %{"data" => data}}) when is_list(data), do: {:ok, Result.from_maps(data)}
-  def results({:ok, _response}), do: {:ok, []}
-  def results(error), do: error
+  @spec results(Client.response(), String.t() | nil) ::
+          {:ok, Turbopuffer.query_response()} | {:error, term()}
+  def results(response, vector_attribute \\ "vector")
+
+  def results({:ok, %{"rows" => rows}}, vector_attribute) when is_list(rows),
+    do: {:ok, Result.from_maps(rows, vector_attribute)}
+
+  def results({:ok, _response}, _vector_attribute), do: {:ok, []}
+  def results(error, _vector_attribute), do: error
 end

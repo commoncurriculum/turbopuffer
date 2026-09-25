@@ -39,10 +39,15 @@ defmodule Turbopuffer.Namespace do
   @doc """
   Lists namespaces.
 
+  Returns one page of namespaces, as maps with `"id"`, and the `next_cursor` for the next page, which
+  is `nil` on the last page.
+
   ## Options
     * `:prefix` - Filter namespaces by prefix
-    * `:page_size` - Number of results per page
+    * `:page_size` - Number of results per page (turbopuffer's default: 100, maximum: 1,000)
     * `:cursor` - Cursor for pagination
+
+  Unknown options raise `ArgumentError`.
 
   ## Examples
 
@@ -53,19 +58,8 @@ defmodule Turbopuffer.Namespace do
   def list(client, opts \\ []) do
     query_params =
       opts
-      |> Enum.reduce([], fn
-        {:prefix, value}, acc when is_binary(value) ->
-          [{"prefix", value} | acc]
-
-        {:page_size, value}, acc when is_integer(value) ->
-          [{"page_size", Integer.to_string(value)} | acc]
-
-        {:cursor, value}, acc when is_binary(value) ->
-          [{"cursor", value} | acc]
-
-        _, acc ->
-          acc
-      end)
+      |> Keyword.validate!([:prefix, :page_size, :cursor])
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 
     query_string = URI.encode_query(query_params)
     path = if query_string == "", do: "/v1/namespaces", else: "/v1/namespaces?#{query_string}"
