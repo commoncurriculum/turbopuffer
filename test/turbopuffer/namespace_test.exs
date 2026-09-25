@@ -15,7 +15,7 @@ defmodule Turbopuffer.NamespaceTest do
         assert conn.query_string == ""
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, JSON.encode!(%{"namespaces" => ["ns-a", "ns-b"]}))
+        |> Plug.Conn.resp(200, Jason.encode!(%{"namespaces" => ["ns-a", "ns-b"]}))
       end)
 
       assert {:ok, %{namespaces: ["ns-a", "ns-b"], next_cursor: nil}} = Namespace.list(client)
@@ -27,7 +27,7 @@ defmodule Turbopuffer.NamespaceTest do
         assert params["prefix"] == "prod-"
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, JSON.encode!(%{"namespaces" => ["prod-a"]}))
+        |> Plug.Conn.resp(200, Jason.encode!(%{"namespaces" => ["prod-a"]}))
       end)
 
       assert {:ok, %{namespaces: ["prod-a"], next_cursor: nil}} =
@@ -41,7 +41,7 @@ defmodule Turbopuffer.NamespaceTest do
         assert params["cursor"] == "abc123"
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, JSON.encode!(%{
+        |> Plug.Conn.resp(200, Jason.encode!(%{
           "namespaces" => ["ns-1", "ns-2"],
           "next_cursor" => "def456"
         }))
@@ -55,7 +55,7 @@ defmodule Turbopuffer.NamespaceTest do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, JSON.encode!(%{
+        |> Plug.Conn.resp(200, Jason.encode!(%{
           "namespaces" => ["ns-1"],
           "next_cursor" => "cursor-xyz"
         }))
@@ -68,7 +68,7 @@ defmodule Turbopuffer.NamespaceTest do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, JSON.encode!(%{}))
+        |> Plug.Conn.resp(200, Jason.encode!(%{}))
       end)
 
       assert {:ok, %{namespaces: [], next_cursor: nil}} = Namespace.list(client)
@@ -78,7 +78,7 @@ defmodule Turbopuffer.NamespaceTest do
       Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(401, JSON.encode!(%{"error" => "unauthorized"}))
+        |> Plug.Conn.resp(401, Jason.encode!(%{"error" => "unauthorized"}))
       end)
 
       assert {:error, {:http_error, 401, _}} = Namespace.list(client)
@@ -89,7 +89,7 @@ defmodule Turbopuffer.NamespaceTest do
         assert conn.query_string == ""
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, JSON.encode!(%{"namespaces" => []}))
+        |> Plug.Conn.resp(200, Jason.encode!(%{"namespaces" => []}))
       end)
 
       assert {:ok, %{namespaces: [], next_cursor: nil}} =

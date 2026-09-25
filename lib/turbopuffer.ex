@@ -46,14 +46,18 @@ defmodule Turbopuffer do
   # Client options
   @type client_opts :: [
           {:api_key, String.t()}
-          | {:region, :gcp_us_central1 | :gcp_europe_west4 | :gcp_asia_northeast1}
+          | {:region, atom() | String.t()}
           | {:base_url, String.t()}
           | {:finch_name, atom()}
+          | {:max_retries, non_neg_integer()}
+          | {:retry_delay, non_neg_integer()}
         ]
 
+  # Passed to Finch.request/3, see Turbopuffer.Client.request/5
   @type request_opts :: [
-          {:timeout, pos_integer()}
-          | {:receive_timeout, pos_integer()}
+          {:pool_timeout, timeout()}
+          | {:receive_timeout, timeout()}
+          | {:request_timeout, timeout()}
         ]
 
   # Filter types
@@ -91,10 +95,20 @@ defmodule Turbopuffer do
           | {:delete_by_filter, map()}
           | {:copy_from_namespace, String.t()}
           | {:encryption, map()}
+          | {:patch_by_filter, map()}
+          | {:patch_by_filter_allow_partial, boolean()}
+          | {:delete_by_filter_allow_partial, boolean()}
+          | {:return_affected_ids, boolean()}
+          | {:branch_from_namespace, String.t()}
+          | {:sharding, map()}
+          | {:disable_backpressure, boolean()}
         ]
 
+  @type ann_query :: [float()] | {:embed, String.t()} | {:embed, String.t(), String.t()}
+
   @type vector_query_opts :: [
-          {:vector, [float()]}
+          {:vector, ann_query()}
+          | {:vector_attribute, String.t()}
           | {:top_k, pos_integer()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:include_vectors, boolean()}
@@ -116,18 +130,24 @@ defmodule Turbopuffer do
         ]
 
   @type hybrid_search_opts :: [
-          {:vector, [float()]}
+          {:vector, ann_query()}
+          | {:vector_attribute, String.t()}
           | {:text_query, String.t()}
           | {:text_attribute, String.t()}
           | {:top_k, pos_integer()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:filters, filters()}
+          | {:rerank_by, rerank_by() | nil}
         ]
+
+  @type rerank_by ::
+          :rrf | {:rrf, [{:rank_constant, pos_integer()} | {:weights, [number()]}]}
 
   @type multi_query_opts :: [
           {:queries, [map()]}
           | {:top_k, pos_integer()}
           | {:include_attributes, boolean() | [String.t()]}
+          | {:rerank_by, rerank_by()}
         ]
 
   @doc """
@@ -135,7 +155,7 @@ defmodule Turbopuffer do
 
   ## Options
     * `:api_key` - The API key for authentication (can also use TURBOPUFFER_API_KEY env var)
-    * `:region` - The region to connect to (defaults to :gcp_us_central1)
+    * `:region` - Any turbopuffer region, e.g. `"aws-us-east-1"` or `:aws_us_east_1` (defaults to :gcp_us_central1)
     * `:base_url` - Override the base URL for the API
 
   ## Examples
@@ -169,6 +189,8 @@ defmodule Turbopuffer do
     * `:deletes` - List of IDs to delete
     * `:distance_metric` - The distance metric to use (e.g., "cosine_distance", "euclidean_squared")
     * `:schema` - Schema configuration for attributes
+
+  `Turbopuffer.Vector.write/2` lists every option. Unknown options raise `ArgumentError`.
 
   ## Examples
 
@@ -237,13 +259,16 @@ defmodule Turbopuffer do
   defdelegate text_search(namespace, opts), to: Search, as: :text
 
   @doc """
-  Performs hybrid search combining vector and text.
+  Performs hybrid search combining vector and text, fused with reciprocal rank fusion.
+  See `Turbopuffer.Search.hybrid/2`.
 
   ## Options
     * `:vector` - The query vector
     * `:text_query` - The text query
     * `:text_attribute` - The attribute for text search
     * `:top_k` - Number of results (default: 10)
+    * `:rerank_by` - How to fuse the two rankings (default: `:rrf`). `nil` returns the vector rows,
+      then the text rows, unfused
 
   ## Examples
 
@@ -259,11 +284,13 @@ defmodule Turbopuffer do
   defdelegate hybrid_search(namespace, opts), to: Search, as: :hybrid
 
   @doc """
-  Performs multiple queries with rank fusion.
+  Runs several queries in one request, optionally fusing them with reciprocal rank fusion.
+  See `Turbopuffer.Search.multi_query/2`.
 
   ## Options
     * `:queries` - List of query configurations
-    * `:top_k` - Number of final results
+    * `:top_k` - Number of fused results with `:rerank_by`
+    * `:rerank_by` - `:rrf`, or `{:rrf, rank_constant: 60, weights: [2, 1]}`
 
   ## Examples
 
@@ -271,7 +298,7 @@ defmodule Turbopuffer do
         %{rank_by: [:vector, :ann, [0.1, 0.2, 0.3]], top_k: 10},
         %{rank_by: ["content", "BM25", "search terms"], top_k: 10}
       ]
-      {:ok, results} = Turbopuffer.multi_query(namespace, queries: queries)
+      {:ok, results} = Turbopuffer.multi_query(namespace, queries: queries, rerank_by: :rrf)
   """
   @spec multi_query(Namespace.t(), multi_query_opts()) ::
           {:ok, query_response()} | {:error, term()}

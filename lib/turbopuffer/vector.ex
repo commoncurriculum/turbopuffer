@@ -3,7 +3,44 @@ defmodule Turbopuffer.Vector do
   Handles vector operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Result}
+  alias Turbopuffer.{Client, Namespace, Query, RankBy}
+
+  @write_options [
+    :upsert_rows,
+    :upsert_columns,
+    :patch_rows,
+    :patch_columns,
+    :deletes,
+    :delete_by_filter,
+    :distance_metric,
+    :schema,
+    :upsert_condition,
+    :patch_condition,
+    :delete_condition,
+    :copy_from_namespace,
+    :encryption,
+    :patch_by_filter,
+    :patch_by_filter_allow_partial,
+    :delete_by_filter_allow_partial,
+    :return_affected_ids,
+    :branch_from_namespace,
+    :sharding,
+    :disable_backpressure
+  ]
+
+  @query_options [
+    :vector,
+    :vector_attribute,
+    :top_k,
+    :include_attributes,
+    :include_vectors,
+    :filters,
+    :exclude_attributes,
+    :aggregate_by,
+    :group_by,
+    :vector_encoding,
+    :consistency
+  ]
 
   @doc """
   Writes vectors to a namespace (upserts, patches, and/or deletes).
@@ -22,6 +59,15 @@ defmodule Turbopuffer.Vector do
     * `:delete_condition` - Conditional delete
     * `:copy_from_namespace` - Copy all documents from another namespace
     * `:encryption` - Customer managed encryption configuration
+    * `:patch_by_filter` - `%{filters: ..., patch: ...}` to patch every document matching a filter
+    * `:patch_by_filter_allow_partial`, `:delete_by_filter_allow_partial` - Let filter writes stop at
+      turbopuffer's per-request limit instead of failing
+    * `:return_affected_ids` - Return the ids that were upserted, patched, and deleted
+    * `:branch_from_namespace` - Branch from another namespace
+    * `:sharding` - Sharding configuration
+    * `:disable_backpressure` - Accept writes past the unindexed-data limit
+
+  Unknown options raise `ArgumentError`.
 
   ## Examples
 
@@ -64,94 +110,42 @@ defmodule Turbopuffer.Vector do
 
     body =
       opts
-      |> Enum.reduce(%{}, &build_write_body/2)
+      |> Keyword.validate!(@write_options)
+      |> Enum.flat_map(&write_field/1)
+      |> Map.new()
 
     Client.post(namespace.client, path, body)
   end
 
-  # Pattern match on write options and build the request body
-  defp build_write_body({:upsert_rows, []}, acc), do: acc
-  defp build_write_body({:upsert_rows, rows}, acc) do
-    Map.put(acc, "upsert_rows", format_write_vectors(rows))
-  end
+  defp write_field({_key, nil}), do: []
+  defp write_field({key, []}) when key in [:upsert_rows, :patch_rows, :deletes], do: []
 
-  defp build_write_body({:patch_rows, []}, acc), do: acc
-  defp build_write_body({:patch_rows, rows}, acc) do
-    Map.put(acc, "patch_rows", format_write_vectors(rows))
-  end
+  defp write_field({key, rows}) when key in [:upsert_rows, :patch_rows],
+    do: [{Atom.to_string(key), format_write_vectors(rows)}]
 
-  defp build_write_body({:deletes, []}, acc), do: acc
-  defp build_write_body({:deletes, ids}, acc) do
-    Map.put(acc, "deletes", ids)
-  end
-
-  defp build_write_body({:upsert_columns, nil}, acc), do: acc
-  defp build_write_body({:upsert_columns, columns}, acc) do
-    Map.put(acc, "upsert_columns", columns)
-  end
-
-  defp build_write_body({:patch_columns, nil}, acc), do: acc
-  defp build_write_body({:patch_columns, columns}, acc) do
-    Map.put(acc, "patch_columns", columns)
-  end
-
-  defp build_write_body({:delete_by_filter, nil}, acc), do: acc
-  defp build_write_body({:delete_by_filter, filter}, acc) do
-    Map.put(acc, "delete_by_filter", filter)
-  end
-
-  defp build_write_body({:distance_metric, nil}, acc), do: acc
-  defp build_write_body({:distance_metric, metric}, acc) do
-    Map.put(acc, "distance_metric", metric)
-  end
-
-  defp build_write_body({:schema, nil}, acc), do: acc
-  defp build_write_body({:schema, schema}, acc) do
-    Map.put(acc, "schema", schema)
-  end
-
-  defp build_write_body({:upsert_condition, nil}, acc), do: acc
-  defp build_write_body({:upsert_condition, condition}, acc) do
-    Map.put(acc, "upsert_condition", condition)
-  end
-
-  defp build_write_body({:patch_condition, nil}, acc), do: acc
-  defp build_write_body({:patch_condition, condition}, acc) do
-    Map.put(acc, "patch_condition", condition)
-  end
-
-  defp build_write_body({:delete_condition, nil}, acc), do: acc
-  defp build_write_body({:delete_condition, condition}, acc) do
-    Map.put(acc, "delete_condition", condition)
-  end
-
-  defp build_write_body({:copy_from_namespace, nil}, acc), do: acc
-  defp build_write_body({:copy_from_namespace, namespace}, acc) do
-    Map.put(acc, "copy_from_namespace", namespace)
-  end
-
-  defp build_write_body({:encryption, nil}, acc), do: acc
-  defp build_write_body({:encryption, config}, acc) do
-    Map.put(acc, "encryption", config)
-  end
-
-  # Ignore unknown options
-  defp build_write_body(_, acc), do: acc
+  defp write_field({key, value}), do: [{Atom.to_string(key), value}]
 
   @doc """
   Queries vectors by similarity.
 
   ## Options
-    * `:vector` - The query vector (required)
+    * `:vector` - The query vector (required). Pass `{:embed, text}` or `{:embed, text, model}` to have
+      turbopuffer embed the text (https://turbopuffer.com/docs/embedding)
+    * `:vector_attribute` - The attribute to search (default: "vector"). For native embedding, the
+      string attribute that has `embed` in the schema
     * `:top_k` - Number of results to return (default: 10)
     * `:include_attributes` - List of attributes to include in results, or `true` for all (default: true)
     * `:filters` - Metadata filters to apply as a map
-    * `:include_vectors` - Whether to include vectors in results (default: false)
+    * `:include_vectors` - Whether to include `:vector_attribute` in results (default: false). Not
+      allowed with `{:embed, ...}`, whose vector attribute only the schema knows: list it in
+      `:include_attributes` instead
     * `:exclude_attributes` - List of attributes to exclude from results
     * `:aggregate_by` - Aggregation configuration
     * `:group_by` - Attributes to group aggregations by
     * `:vector_encoding` - Vector encoding format (:float or :base64)
     * `:consistency` - Read consistency (:strong or :eventual)
+
+  Unknown options raise `ArgumentError`.
 
   ## Examples
 
@@ -175,57 +169,64 @@ defmodule Turbopuffer.Vector do
         top_k: 10,
         include_vectors: true
       )
+
+      # Search a string attribute that turbopuffer embeds
+      Turbopuffer.Vector.query(namespace,
+        vector: {:embed, "foxes that jump"},
+        vector_attribute: "content"
+      )
   """
   @spec query(Namespace.t(), Turbopuffer.vector_query_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def query(%Namespace{} = namespace, opts) do
+    Keyword.validate!(opts, @query_options)
     vector = Keyword.fetch!(opts, :vector)
+    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
     path = "/v2/namespaces/#{namespace.name}/query"
 
     body =
       opts
-      |> build_query_body(vector)
+      |> build_query_body(vector, vector_attribute)
 
     namespace.client
     |> Client.post(path, body)
-    |> handle_query_response()
+    |> Query.results()
   end
 
   # Build query body from options using pattern matching
-  defp build_query_body(opts, vector) do
+  defp build_query_body(opts, vector, vector_attribute) do
     base_body = %{
-      "rank_by" => ["vector", "ANN", vector],
+      "rank_by" => RankBy.ann(vector_attribute, vector),
       "top_k" => Keyword.get(opts, :top_k, 10),
-      "include_attributes" => process_include_attributes(opts)
+      "include_attributes" => process_include_attributes(opts, vector, vector_attribute)
     }
 
     opts
     |> Enum.reduce(base_body, &add_query_option/2)
   end
 
-  defp process_include_attributes(opts) do
+  defp process_include_attributes(opts, vector, vector_attribute) do
     include_attributes = Keyword.get(opts, :include_attributes, true)
     include_vectors = Keyword.get(opts, :include_vectors, false)
 
+    # A natively embedded string attribute keeps its vector under another name, which only the
+    # namespace's schema knows.
+    if include_vectors == true and not is_list(vector) do
+      raise ArgumentError,
+            "include_vectors can't tell which attribute holds the vector for #{inspect(vector)}, " <>
+              "so add that attribute to :include_attributes instead"
+    end
+
     # Normalize :all to true
-    include_attributes = normalize_include_attributes(include_attributes)
+    include_attributes = Query.normalize_include_attributes(include_attributes)
 
     case {include_attributes, include_vectors} do
-      {true, true} -> ["vector"]
+      {true, true} -> [vector_attribute]
       {true, false} -> true
-      {attrs, true} when is_list(attrs) -> ["vector" | attrs] |> Enum.uniq()
+      {attrs, true} when is_list(attrs) -> [vector_attribute | attrs] |> Enum.uniq()
       {attrs, false} -> attrs
       _ -> include_attributes
     end
-  end
-
-  defp normalize_include_attributes(:all), do: true
-  defp normalize_include_attributes(value) when is_boolean(value), do: value
-  defp normalize_include_attributes(value) when is_list(value), do: value
-  defp normalize_include_attributes(value) do
-    raise ArgumentError,
-      "invalid value for :include_attributes: #{inspect(value)}. " <>
-      "Expected a boolean, :all, or a list of attribute name strings"
   end
 
   # Pattern match on query options
@@ -236,7 +237,7 @@ defmodule Turbopuffer.Vector do
 
   defp add_query_option({:filters, nil}, acc), do: acc
   defp add_query_option({:filters, filters}, acc) do
-    Map.put(acc, "filters", format_filters(filters))
+    Map.put(acc, "filters", Query.format_filters(filters))
   end
 
   defp add_query_option({:exclude_attributes, nil}, acc), do: acc
@@ -266,25 +267,6 @@ defmodule Turbopuffer.Vector do
 
   defp add_query_option(_, acc), do: acc
 
-  # Handle different response formats with pattern matching
-  defp handle_query_response({:ok, %{"rows" => rows}}) when is_list(rows) do
-    {:ok, Result.from_maps(rows)}
-  end
-
-  defp handle_query_response({:ok, %{"vectors" => vectors}}) when is_list(vectors) do
-    {:ok, Result.from_maps(vectors)}
-  end
-
-  defp handle_query_response({:ok, %{"data" => data}}) when is_list(data) do
-    {:ok, Result.from_maps(data)}
-  end
-
-  defp handle_query_response({:ok, _}) do
-    {:ok, []}
-  end
-
-  defp handle_query_response(error), do: error
-
   # Format vectors for write operations - attributes are flattened
   defp format_write_vectors(vectors) do
     Enum.map(vectors, &format_single_vector/1)
@@ -310,23 +292,6 @@ defmodule Turbopuffer.Vector do
       |> Map.merge(base)
     end
   end
-
-  # Convert map filters to tuple format expected by API
-  defp format_filters(nil), do: nil
-
-  defp format_filters(filters) when is_map(filters) do
-    conditions =
-      Enum.map(filters, fn {key, value} ->
-        [to_string(key), "Eq", value]
-      end)
-
-    case conditions do
-      [single] -> single
-      multiple -> ["And" | [multiple]]
-    end
-  end
-
-  defp format_filters(filters), do: filters
 
   defp format_encoding(nil), do: nil
   defp format_encoding(:float), do: "float"

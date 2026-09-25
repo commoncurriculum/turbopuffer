@@ -9,7 +9,7 @@ An Elixir client library for the [Turbopuffer](https://turbopuffer.com) vector d
 - Hybrid search combining vector and text
 - Namespace management
 - Built with Finch for efficient HTTP connection pooling
-- Native JSON support (Elixir 1.18+)
+- Uses Elixir's built-in `JSON` on 1.18+, or `Jason` on Elixir 1.15–1.17
 
 [![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjallum%2Fturbopuffer%2Frefs%2Fheads%2Fmain%2Flivebooks%2Fquickstart.livemd)
 
@@ -41,6 +41,14 @@ Or pass it directly when creating a client:
 
 ```elixir
 client = Turbopuffer.new(api_key: "your-api-key")
+```
+
+On Elixir 1.18+ the client uses the built-in `JSON` module. On earlier versions, add
+`{:jason, "~> 1.4"}` to your deps. To choose the library yourself, set it in your config. It's
+read when turbopuffer compiles:
+
+```elixir
+config :turbopuffer, :json_library, Jason
 ```
 
 ## Quick Start
@@ -116,7 +124,7 @@ end)
 ```elixir
 client = Turbopuffer.new(
   api_key: "your-key",
-  region: :gcp_us_central1  # or :gcp_europe_west4, :gcp_asia_northeast1
+  region: :gcp_us_central1  # any region from https://turbopuffer.com/docs/regions, e.g. "aws-us-east-1"
 )
 ```
 
