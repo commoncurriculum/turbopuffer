@@ -51,6 +51,16 @@ defmodule Turbopuffer.Client do
 
   @doc """
   Makes an HTTP request to the Turbopuffer API.
+
+  ## Options
+
+  `request/5`, `get/3`, `post/4`, and `delete/3` pass these to `Finch.request/3`:
+
+    * `:pool_timeout` - Milliseconds to wait for a connection from the pool (Finch's default: 5_000)
+    * `:receive_timeout` - Milliseconds to wait for each chunk of the response (Finch's default:
+      15_000)
+    * `:request_timeout` - Milliseconds to wait for the whole response, HTTP/1 only (Finch's
+      default: `:infinity`)
   """
   @spec request(t(), atom(), String.t(), map() | nil, Turbopuffer.request_opts()) :: response()
   def request(client, method, path, body \\ nil, opts \\ []) do

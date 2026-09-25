@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Bug fixes
+
+- `Turbopuffer.request_opts` and the `Turbopuffer.Client` request docs list the options Finch takes: `:pool_timeout`, `:receive_timeout`, and `:request_timeout`. They listed `:timeout`, which Finch ignored before 0.22 and rejects with an `ArgumentError` from 0.22 on
+
 ## 0.2.0 (2026-02-19)
 
 ### Enhancements
