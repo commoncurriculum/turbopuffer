@@ -3,7 +3,7 @@ defmodule Turbopuffer.Vector do
   Handles vector operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Result}
+  alias Turbopuffer.{Client, Namespace, RankBy, Result}
 
   @write_options [
     :upsert_rows,
@@ -136,7 +136,9 @@ defmodule Turbopuffer.Vector do
     * `:top_k` - Number of results to return (default: 10)
     * `:include_attributes` - List of attributes to include in results, or `true` for all (default: true)
     * `:filters` - Metadata filters to apply as a map
-    * `:include_vectors` - Whether to include vectors in results (default: false)
+    * `:include_vectors` - Whether to include `:vector_attribute` in results (default: false). Not
+      allowed with `{:embed, ...}`, whose vector attribute only the schema knows: list it in
+      `:include_attributes` instead
     * `:exclude_attributes` - List of attributes to exclude from results
     * `:aggregate_by` - Aggregation configuration
     * `:group_by` - Attributes to group aggregations by
@@ -179,11 +181,12 @@ defmodule Turbopuffer.Vector do
   def query(%Namespace{} = namespace, opts) do
     Keyword.validate!(opts, @query_options)
     vector = Keyword.fetch!(opts, :vector)
+    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
     path = "/v2/namespaces/#{namespace.name}/query"
 
     body =
       opts
-      |> build_query_body(vector)
+      |> build_query_body(vector, vector_attribute)
 
     namespace.client
     |> Client.post(path, body)
@@ -191,21 +194,28 @@ defmodule Turbopuffer.Vector do
   end
 
   # Build query body from options using pattern matching
-  defp build_query_body(opts, vector) do
+  defp build_query_body(opts, vector, vector_attribute) do
     base_body = %{
-      "rank_by" => [Keyword.get(opts, :vector_attribute, "vector"), "ANN", ann_query(vector)],
+      "rank_by" => RankBy.ann(vector_attribute, vector),
       "top_k" => Keyword.get(opts, :top_k, 10),
-      "include_attributes" => process_include_attributes(opts)
+      "include_attributes" => process_include_attributes(opts, vector, vector_attribute)
     }
 
     opts
     |> Enum.reduce(base_body, &add_query_option/2)
   end
 
-  defp process_include_attributes(opts) do
+  defp process_include_attributes(opts, vector, vector_attribute) do
     include_attributes = Keyword.get(opts, :include_attributes, true)
     include_vectors = Keyword.get(opts, :include_vectors, false)
-    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
+
+    # A natively embedded string attribute keeps its vector under another name, which only the
+    # namespace's schema knows.
+    if include_vectors == true and not is_list(vector) do
+      raise ArgumentError,
+            "include_vectors can't tell which attribute holds the vector for #{inspect(vector)}, " <>
+              "so add that attribute to :include_attributes instead"
+    end
 
     # Normalize :all to true
     include_attributes = normalize_include_attributes(include_attributes)
@@ -265,22 +275,6 @@ defmodule Turbopuffer.Vector do
   end
 
   defp add_query_option(_, acc), do: acc
-
-  @doc false
-  # The query side of an ANN rank_by: a vector, or text for turbopuffer to embed.
-  def ann_query({:embed, text}) when is_binary(text), do: ["Embed", text]
-
-  def ann_query({:embed, text, model}) when is_binary(text) and is_binary(model) do
-    ["Embed", text, %{"model" => model}]
-  end
-
-  def ann_query(vector) when is_list(vector), do: vector
-
-  def ann_query(other) do
-    raise ArgumentError,
-          "invalid :vector #{inspect(other)}, expected a list of numbers, {:embed, text}, " <>
-            "or {:embed, text, model}"
-  end
 
   # Handle different response formats with pattern matching
   defp handle_query_response({:ok, %{"rows" => rows}}) when is_list(rows) do

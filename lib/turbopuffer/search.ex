@@ -3,7 +3,7 @@ defmodule Turbopuffer.Search do
   Handles text and hybrid search operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Result}
+  alias Turbopuffer.{Client, Namespace, RankBy, Result}
 
   @text_options [:query, :attribute, :top_k, :include_attributes, :filters]
   @hybrid_options [
@@ -126,6 +126,7 @@ defmodule Turbopuffer.Search do
   def hybrid(%Namespace{} = namespace, opts) do
     Keyword.validate!(opts, @hybrid_options)
     vector = Keyword.fetch!(opts, :vector)
+    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
     text_query = Keyword.fetch!(opts, :text_query)
     text_attribute = Keyword.fetch!(opts, :text_attribute)
     top_k = Keyword.get(opts, :top_k, 10)
@@ -133,11 +134,9 @@ defmodule Turbopuffer.Search do
     filters = Keyword.get(opts, :filters)
 
     # Use multi_query for hybrid search
-    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
-
     queries = [
       %{
-        rank_by: [vector_attribute, "ANN", Turbopuffer.Vector.ann_query(vector)],
+        rank_by: RankBy.ann(vector_attribute, vector),
         top_k: top_k,
         include_attributes: include_attributes,
         filters: filters
