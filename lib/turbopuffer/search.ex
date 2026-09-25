@@ -3,7 +3,7 @@ defmodule Turbopuffer.Search do
   Handles text and hybrid search operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Result}
+  alias Turbopuffer.{Client, Namespace, Query, Result}
 
   @doc """
   Performs a full-text search using BM25 ranking.
@@ -34,40 +34,21 @@ defmodule Turbopuffer.Search do
 
     namespace.client
     |> Client.post(path, body)
-    |> handle_search_response()
+    |> Query.results()
   end
 
   defp build_text_search_body(opts, query, attribute) do
     base_body = %{
       "rank_by" => [attribute, "BM25", query],
       "top_k" => Keyword.get(opts, :top_k, 10),
-      "include_attributes" => normalize_include_attributes(Keyword.get(opts, :include_attributes, true))
+      "include_attributes" => Query.normalize_include_attributes(Keyword.get(opts, :include_attributes, true))
     }
 
     case Keyword.get(opts, :filters) do
       nil -> base_body
-      filters -> Map.put(base_body, "filters", format_filters(filters))
+      filters -> Map.put(base_body, "filters", Query.format_filters(filters))
     end
   end
-
-  # Handle different response formats with pattern matching
-  defp handle_search_response({:ok, %{"rows" => rows}}) when is_list(rows) do
-    {:ok, Result.from_maps(rows)}
-  end
-
-  defp handle_search_response({:ok, %{"vectors" => vectors}}) when is_list(vectors) do
-    {:ok, Result.from_maps(vectors)}
-  end
-
-  defp handle_search_response({:ok, %{"data" => data}}) when is_list(data) do
-    {:ok, Result.from_maps(data)}
-  end
-
-  defp handle_search_response({:ok, _}) do
-    {:ok, []}
-  end
-
-  defp handle_search_response(error), do: error
 
   @doc """
   Performs a hybrid search combining vector and text search.
@@ -172,17 +153,8 @@ defmodule Turbopuffer.Search do
 
         {:ok, Result.from_maps(all_rows)}
 
-      {:ok, %{"rows" => rows}} when is_list(rows) ->
-        {:ok, Result.from_maps(rows)}
-
-      {:ok, %{"vectors" => vectors}} when is_list(vectors) ->
-        {:ok, Result.from_maps(vectors)}
-
-      {:ok, _response} ->
-        {:ok, []}
-
-      error ->
-        error
+      response ->
+        Query.results(response)
     end
   end
 
@@ -190,12 +162,12 @@ defmodule Turbopuffer.Search do
     base_query = %{
       "rank_by" => format_rank_by(rank_by),
       "top_k" => Map.get(query, :top_k, 10),
-      "include_attributes" => normalize_include_attributes(Map.get(query, :include_attributes, include_attributes))
+      "include_attributes" => Query.normalize_include_attributes(Map.get(query, :include_attributes, include_attributes))
     }
 
     case Map.get(query, :filters) do
       nil -> base_query
-      filters -> Map.put(base_query, "filters", format_filters(filters))
+      filters -> Map.put(base_query, "filters", Query.format_filters(filters))
     end
   end
 
@@ -213,30 +185,4 @@ defmodule Turbopuffer.Search do
   end
 
   defp format_rank_by(rank_by), do: rank_by
-
-  defp normalize_include_attributes(:all), do: true
-  defp normalize_include_attributes(value) when is_boolean(value), do: value
-  defp normalize_include_attributes(value) when is_list(value), do: value
-  defp normalize_include_attributes(value) do
-    raise ArgumentError,
-      "invalid value for :include_attributes: #{inspect(value)}. " <>
-      "Expected a boolean, :all, or a list of attribute name strings"
-  end
-
-  # Convert map filters to tuple format expected by API
-  defp format_filters(nil), do: nil
-
-  defp format_filters(filters) when is_map(filters) do
-    conditions =
-      Enum.map(filters, fn {key, value} ->
-        [to_string(key), "Eq", value]
-      end)
-
-    case conditions do
-      [single] -> single
-      multiple -> ["And" | [multiple]]
-    end
-  end
-
-  defp format_filters(filters), do: filters
 end

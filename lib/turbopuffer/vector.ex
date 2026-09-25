@@ -3,7 +3,7 @@ defmodule Turbopuffer.Vector do
   Handles vector operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Result}
+  alias Turbopuffer.{Client, Namespace, Query}
 
   @doc """
   Writes vectors to a namespace (upserts, patches, and/or deletes).
@@ -188,7 +188,7 @@ defmodule Turbopuffer.Vector do
 
     namespace.client
     |> Client.post(path, body)
-    |> handle_query_response()
+    |> Query.results()
   end
 
   # Build query body from options using pattern matching
@@ -208,7 +208,7 @@ defmodule Turbopuffer.Vector do
     include_vectors = Keyword.get(opts, :include_vectors, false)
 
     # Normalize :all to true
-    include_attributes = normalize_include_attributes(include_attributes)
+    include_attributes = Query.normalize_include_attributes(include_attributes)
 
     case {include_attributes, include_vectors} do
       {true, true} -> ["vector"]
@@ -219,15 +219,6 @@ defmodule Turbopuffer.Vector do
     end
   end
 
-  defp normalize_include_attributes(:all), do: true
-  defp normalize_include_attributes(value) when is_boolean(value), do: value
-  defp normalize_include_attributes(value) when is_list(value), do: value
-  defp normalize_include_attributes(value) do
-    raise ArgumentError,
-      "invalid value for :include_attributes: #{inspect(value)}. " <>
-      "Expected a boolean, :all, or a list of attribute name strings"
-  end
-
   # Pattern match on query options
   defp add_query_option({:vector, _}, acc), do: acc
   defp add_query_option({:top_k, _}, acc), do: acc
@@ -236,7 +227,7 @@ defmodule Turbopuffer.Vector do
 
   defp add_query_option({:filters, nil}, acc), do: acc
   defp add_query_option({:filters, filters}, acc) do
-    Map.put(acc, "filters", format_filters(filters))
+    Map.put(acc, "filters", Query.format_filters(filters))
   end
 
   defp add_query_option({:exclude_attributes, nil}, acc), do: acc
@@ -266,25 +257,6 @@ defmodule Turbopuffer.Vector do
 
   defp add_query_option(_, acc), do: acc
 
-  # Handle different response formats with pattern matching
-  defp handle_query_response({:ok, %{"rows" => rows}}) when is_list(rows) do
-    {:ok, Result.from_maps(rows)}
-  end
-
-  defp handle_query_response({:ok, %{"vectors" => vectors}}) when is_list(vectors) do
-    {:ok, Result.from_maps(vectors)}
-  end
-
-  defp handle_query_response({:ok, %{"data" => data}}) when is_list(data) do
-    {:ok, Result.from_maps(data)}
-  end
-
-  defp handle_query_response({:ok, _}) do
-    {:ok, []}
-  end
-
-  defp handle_query_response(error), do: error
-
   # Format vectors for write operations - attributes are flattened
   defp format_write_vectors(vectors) do
     Enum.map(vectors, &format_single_vector/1)
@@ -310,23 +282,6 @@ defmodule Turbopuffer.Vector do
       |> Map.merge(base)
     end
   end
-
-  # Convert map filters to tuple format expected by API
-  defp format_filters(nil), do: nil
-
-  defp format_filters(filters) when is_map(filters) do
-    conditions =
-      Enum.map(filters, fn {key, value} ->
-        [to_string(key), "Eq", value]
-      end)
-
-    case conditions do
-      [single] -> single
-      multiple -> ["And" | [multiple]]
-    end
-  end
-
-  defp format_filters(filters), do: filters
 
   defp format_encoding(nil), do: nil
   defp format_encoding(:float), do: "float"
