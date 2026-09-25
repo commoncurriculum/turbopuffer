@@ -49,7 +49,6 @@ defmodule Turbopuffer do
           | {:region, atom() | String.t()}
           | {:base_url, String.t()}
           | {:finch_name, atom()}
-          | {:json_library, module()}
           | {:max_retries, non_neg_integer()}
           | {:retry_delay, non_neg_integer()}
         ]

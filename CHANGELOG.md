@@ -4,7 +4,7 @@
 
 ### Enhancements
 
-- Support Elixir 1.15+: the JSON library is configurable with the `:json_library` client option or application setting, defaulting to Elixir's `JSON` on 1.18+ and `Jason` before that
+- Support Elixir 1.15+: the client uses Elixir's `JSON` on 1.18+ and `Jason` before that, or the module set with `config :turbopuffer, :json_library, ...`
 - `:region` accepts any turbopuffer region, as a string (`"aws-us-east-1"`) or an atom (`:aws_us_east_1`), instead of four GCP regions. An unknown region no longer crashes when `:base_url` is also given
 - `write/2` supports the rest of the documented write options: `patch_by_filter`, `patch_by_filter_allow_partial`, `delete_by_filter_allow_partial`, `return_affected_ids`, `branch_from_namespace`, `sharding`, and `disable_backpressure`
 - `multi_query/2` and `hybrid_search/2` take `rerank_by: :rrf` (or `{:rrf, rank_constant: ..., weights: [...]}`) to have turbopuffer fuse the rankings with reciprocal rank fusion, with `:top_k` limiting the fused results. Without it, results are still returned one query after another with duplicate ids removed, which the docs now say instead of "rank fusion"

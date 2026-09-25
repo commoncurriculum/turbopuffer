@@ -44,8 +44,8 @@ client = Turbopuffer.new(api_key: "your-api-key")
 ```
 
 On Elixir 1.18+ the client uses the built-in `JSON` module. On earlier versions, add
-`{:jason, "~> 1.4"}` to your deps. To choose the library yourself, pass `json_library:` to
-`Turbopuffer.new/1` or set it for every client:
+`{:jason, "~> 1.4"}` to your deps. To choose the library yourself, set it in your config. It's
+read when turbopuffer compiles:
 
 ```elixir
 config :turbopuffer, :json_library, Jason
