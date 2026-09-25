@@ -53,22 +53,19 @@ defmodule Turbopuffer do
           | {:retry_delay, non_neg_integer()}
         ]
 
-  # Passed to Finch.request/3, see Turbopuffer.Client.request/5
+  # See Turbopuffer.Client.request/5
   @type request_opts :: [
-          {:pool_timeout, timeout()}
+          {:respond_async, boolean()}
+          | {:pool_timeout, timeout()}
           | {:receive_timeout, timeout()}
           | {:request_timeout, timeout()}
         ]
 
-  # Filter types
-  # Filters support various operators and value types:
-  # - Equality: %{"category" => "sports"}
-  # - Inequality: %{"price" => %{"$gte" => 10.0, "$lte" => 100.0}}
-  # - In/Not in: %{"status" => %{"$in" => ["active", "pending"]}}
-  # - Null checks: %{"deleted_at" => nil}
+  # A map matches documents whose attributes equal every value in it, e.g. %{"category" => "sports"}.
+  # For anything else, pass turbopuffer's own filter (https://turbopuffer.com/docs/query#filtering-parameters),
+  # e.g. ["And", [["price", "Gte", 10], ["status", "In", ["active", "pending"]]]].
   @type filter_value :: String.t() | number() | boolean() | nil | [String.t() | number()]
-  @type filter_operator :: filter_value | %{String.t() => filter_value}
-  @type filters :: %{String.t() => filter_operator}
+  @type filters :: %{(String.t() | atom()) => filter_value} | list()
 
   # Schema types for namespace configuration
   @type schema_field :: %{
@@ -93,7 +90,7 @@ defmodule Turbopuffer do
           | {:patch_condition, map()}
           | {:delete_condition, map()}
           | {:delete_by_filter, map()}
-          | {:copy_from_namespace, String.t()}
+          | {:copy_from_namespace, String.t() | map()}
           | {:encryption, map()}
           | {:patch_by_filter, map()}
           | {:patch_by_filter_allow_partial, boolean()}
@@ -112,11 +109,17 @@ defmodule Turbopuffer do
           | {:top_k, pos_integer()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:include_vectors, boolean()}
-          | {:filters, filters()}
           | {:exclude_attributes, [String.t()]}
-          | {:aggregate_by, map()}
-          | {:group_by, [String.t()]}
+          | {:filters, filters()}
           | {:vector_encoding, :float | :base64}
+          | {:consistency, :strong | :eventual}
+        ]
+
+  @type aggregate_opts :: [
+          {:aggregate_by, %{String.t() => list()}}
+          | {:group_by, [String.t()]}
+          | {:top_k, pos_integer()}
+          | {:filters, filters()}
           | {:consistency, :strong | :eventual}
         ]
 
@@ -221,12 +224,12 @@ defmodule Turbopuffer do
     * `:top_k` - Number of results to return (default: 10)
     * `:include_attributes` - List of attributes to include or boolean
     * `:include_vectors` - Whether to include vectors in response
+    * `:exclude_attributes` - List of attributes to exclude, instead of `:include_attributes`
     * `:filters` - Metadata filters
-    * `:exclude_attributes` - List of attributes to exclude
-    * `:aggregate_by` - Aggregation configuration
-    * `:group_by` - Group aggregations by attributes
     * `:vector_encoding` - Response format (:float or :base64)
     * `:consistency` - Read consistency (:strong or :eventual)
+
+  `Turbopuffer.Vector.query/2` describes every option.
 
   ## Examples
 
@@ -237,6 +240,17 @@ defmodule Turbopuffer do
   """
   @spec query(Namespace.t(), vector_query_opts()) :: {:ok, query_response()} | {:error, term()}
   defdelegate query(namespace, opts), to: Vector
+
+  @doc """
+  Counts or sums the documents that match `:filters`, optionally for each group of documents.
+  See `Turbopuffer.Search.aggregate/2`.
+
+  ## Examples
+
+      {:ok, %{"count" => 42}} = Turbopuffer.aggregate(namespace, aggregate_by: %{"count" => ["Count"]})
+  """
+  @spec aggregate(Namespace.t(), aggregate_opts()) :: {:ok, map() | [map()]} | {:error, term()}
+  defdelegate aggregate(namespace, opts), to: Search
 
   @doc """
   Performs full-text search.
