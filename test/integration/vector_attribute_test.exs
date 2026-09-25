@@ -1,15 +1,5 @@
 defmodule Turbopuffer.Integration.VectorAttributeTest do
-  use ExUnit.Case, async: true
-
-  @moduletag :integration
-
-  setup do
-    client = Turbopuffer.new(api_key: System.fetch_env!("TURBOPUFFER_API_KEY"))
-    name = "turbopuffer-ex-test-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    namespace = Turbopuffer.namespace(client, name)
-    on_exit(fn -> Turbopuffer.delete_namespace(namespace) end)
-    {:ok, namespace: namespace}
-  end
+  use Turbopuffer.IntegrationCase, async: true
 
   test "searches a vector attribute not named vector", %{namespace: namespace} do
     {:ok, _} =
