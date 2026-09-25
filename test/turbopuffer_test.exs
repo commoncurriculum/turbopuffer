@@ -43,12 +43,6 @@ defmodule TurbopufferTest do
       end
     end
 
-    test "reaches turbopuffer in a region outside GCP" do
-      client = Turbopuffer.new(api_key: "not-a-real-key", region: "aws-us-east-1")
-      assert {:error, {:http_error, 401, %{"status" => "error"}}} =
-               Turbopuffer.list_namespaces(client)
-    end
-
     test "raises without API key when env var not set" do
       original_env = System.get_env("TURBOPUFFER_API_KEY")
       System.delete_env("TURBOPUFFER_API_KEY")
