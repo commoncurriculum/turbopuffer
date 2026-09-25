@@ -3,9 +3,22 @@ defmodule Turbopuffer.Vector do
   Handles vector operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Options, Result}
+  alias Turbopuffer.{Client, Namespace, Result}
 
-  @passthrough_write_options [
+  @write_options [
+    :upsert_rows,
+    :upsert_columns,
+    :patch_rows,
+    :patch_columns,
+    :deletes,
+    :delete_by_filter,
+    :distance_metric,
+    :schema,
+    :upsert_condition,
+    :patch_condition,
+    :delete_condition,
+    :copy_from_namespace,
+    :encryption,
     :patch_by_filter,
     :patch_by_filter_allow_partial,
     :delete_by_filter_allow_partial,
@@ -14,22 +27,6 @@ defmodule Turbopuffer.Vector do
     :sharding,
     :disable_backpressure
   ]
-
-  @write_options [
-                   :upsert_rows,
-                   :upsert_columns,
-                   :patch_rows,
-                   :patch_columns,
-                   :deletes,
-                   :delete_by_filter,
-                   :distance_metric,
-                   :schema,
-                   :upsert_condition,
-                   :patch_condition,
-                   :delete_condition,
-                   :copy_from_namespace,
-                   :encryption
-                 ] ++ @passthrough_write_options
 
   @query_options [
     :vector,
@@ -109,87 +106,24 @@ defmodule Turbopuffer.Vector do
   @spec write(Namespace.t(), keyword()) ::
           {:ok, Turbopuffer.success_response()} | {:error, term()}
   def write(%Namespace{} = namespace, opts \\ []) do
-    Options.validate!(opts, @write_options, "Turbopuffer.write/2")
     path = "/v2/namespaces/#{namespace.name}"
 
     body =
       opts
-      |> Enum.reduce(%{}, &build_write_body/2)
+      |> Keyword.validate!(@write_options)
+      |> Enum.flat_map(&write_field/1)
+      |> Map.new()
 
     Client.post(namespace.client, path, body)
   end
 
-  # Pattern match on write options and build the request body
-  defp build_write_body({:upsert_rows, []}, acc), do: acc
-  defp build_write_body({:upsert_rows, rows}, acc) do
-    Map.put(acc, "upsert_rows", format_write_vectors(rows))
-  end
+  defp write_field({_key, nil}), do: []
+  defp write_field({key, []}) when key in [:upsert_rows, :patch_rows, :deletes], do: []
 
-  defp build_write_body({:patch_rows, []}, acc), do: acc
-  defp build_write_body({:patch_rows, rows}, acc) do
-    Map.put(acc, "patch_rows", format_write_vectors(rows))
-  end
+  defp write_field({key, rows}) when key in [:upsert_rows, :patch_rows],
+    do: [{Atom.to_string(key), format_write_vectors(rows)}]
 
-  defp build_write_body({:deletes, []}, acc), do: acc
-  defp build_write_body({:deletes, ids}, acc) do
-    Map.put(acc, "deletes", ids)
-  end
-
-  defp build_write_body({:upsert_columns, nil}, acc), do: acc
-  defp build_write_body({:upsert_columns, columns}, acc) do
-    Map.put(acc, "upsert_columns", columns)
-  end
-
-  defp build_write_body({:patch_columns, nil}, acc), do: acc
-  defp build_write_body({:patch_columns, columns}, acc) do
-    Map.put(acc, "patch_columns", columns)
-  end
-
-  defp build_write_body({:delete_by_filter, nil}, acc), do: acc
-  defp build_write_body({:delete_by_filter, filter}, acc) do
-    Map.put(acc, "delete_by_filter", filter)
-  end
-
-  defp build_write_body({:distance_metric, nil}, acc), do: acc
-  defp build_write_body({:distance_metric, metric}, acc) do
-    Map.put(acc, "distance_metric", metric)
-  end
-
-  defp build_write_body({:schema, nil}, acc), do: acc
-  defp build_write_body({:schema, schema}, acc) do
-    Map.put(acc, "schema", schema)
-  end
-
-  defp build_write_body({:upsert_condition, nil}, acc), do: acc
-  defp build_write_body({:upsert_condition, condition}, acc) do
-    Map.put(acc, "upsert_condition", condition)
-  end
-
-  defp build_write_body({:patch_condition, nil}, acc), do: acc
-  defp build_write_body({:patch_condition, condition}, acc) do
-    Map.put(acc, "patch_condition", condition)
-  end
-
-  defp build_write_body({:delete_condition, nil}, acc), do: acc
-  defp build_write_body({:delete_condition, condition}, acc) do
-    Map.put(acc, "delete_condition", condition)
-  end
-
-  defp build_write_body({:copy_from_namespace, nil}, acc), do: acc
-  defp build_write_body({:copy_from_namespace, namespace}, acc) do
-    Map.put(acc, "copy_from_namespace", namespace)
-  end
-
-  defp build_write_body({:encryption, nil}, acc), do: acc
-  defp build_write_body({:encryption, config}, acc) do
-    Map.put(acc, "encryption", config)
-  end
-
-  defp build_write_body({key, nil}, acc) when key in @passthrough_write_options, do: acc
-
-  defp build_write_body({key, value}, acc) when key in @passthrough_write_options do
-    Map.put(acc, Atom.to_string(key), value)
-  end
+  defp write_field({key, value}), do: [{Atom.to_string(key), value}]
 
   @doc """
   Queries vectors by similarity.
@@ -243,7 +177,7 @@ defmodule Turbopuffer.Vector do
   @spec query(Namespace.t(), Turbopuffer.vector_query_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def query(%Namespace{} = namespace, opts) do
-    Options.validate!(opts, @query_options, "Turbopuffer.query/2")
+    Keyword.validate!(opts, @query_options)
     vector = Keyword.fetch!(opts, :vector)
     path = "/v2/namespaces/#{namespace.name}/query"
 

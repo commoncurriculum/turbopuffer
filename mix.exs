@@ -8,6 +8,7 @@ defmodule Turbopuffer.MixProject do
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      elixirc_paths: elixirc_paths(Mix.env()),
       description: "Elixir client for the Turbopuffer vector search API",
       package: [
         licenses: ["MIT"],
@@ -15,6 +16,9 @@ defmodule Turbopuffer.MixProject do
       ]
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do

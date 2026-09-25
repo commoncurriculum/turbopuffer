@@ -13,7 +13,7 @@
 
 ### Breaking changes
 
-- `write/2`, `query/2`, `text_search/2`, `hybrid_search/2`, and `multi_query/2` raise `ArgumentError` for unknown options instead of dropping them, so a typo like `upsert_conditon:` no longer turns a conditional write into an unconditional one
+- `write/2`, `query/2`, `text_search/2`, `hybrid_search/2`, and `multi_query/2` raise `ArgumentError` for unknown or repeated options instead of dropping them, so a typo like `upsert_conditon:` no longer turns a conditional write into an unconditional one
 
 ## 0.2.0 (2026-02-19)
 

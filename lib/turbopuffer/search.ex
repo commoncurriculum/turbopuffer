@@ -3,7 +3,7 @@ defmodule Turbopuffer.Search do
   Handles text and hybrid search operations for Turbopuffer.
   """
 
-  alias Turbopuffer.{Client, Namespace, Options, Result}
+  alias Turbopuffer.{Client, Namespace, Result}
 
   @text_options [:query, :attribute, :top_k, :include_attributes, :filters]
   @hybrid_options [
@@ -39,7 +39,7 @@ defmodule Turbopuffer.Search do
   @spec text(Namespace.t(), Turbopuffer.text_search_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def text(%Namespace{} = namespace, opts) do
-    Options.validate!(opts, @text_options, "Turbopuffer.text_search/2")
+    Keyword.validate!(opts, @text_options)
     query = Keyword.fetch!(opts, :query)
     attribute = Keyword.fetch!(opts, :attribute)
     path = "/v2/namespaces/#{namespace.name}/query"
@@ -119,7 +119,7 @@ defmodule Turbopuffer.Search do
   @spec hybrid(Namespace.t(), Turbopuffer.hybrid_search_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def hybrid(%Namespace{} = namespace, opts) do
-    Options.validate!(opts, @hybrid_options, "Turbopuffer.hybrid_search/2")
+    Keyword.validate!(opts, @hybrid_options)
     vector = Keyword.fetch!(opts, :vector)
     text_query = Keyword.fetch!(opts, :text_query)
     text_attribute = Keyword.fetch!(opts, :text_attribute)
@@ -188,7 +188,7 @@ defmodule Turbopuffer.Search do
   @spec multi_query(Namespace.t(), Turbopuffer.multi_query_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def multi_query(%Namespace{} = namespace, opts) do
-    Options.validate!(opts, @multi_query_options, "Turbopuffer.multi_query/2")
+    Keyword.validate!(opts, @multi_query_options)
     queries = Keyword.fetch!(opts, :queries)
     top_k = Keyword.get(opts, :top_k, 10)
     include_attributes = Keyword.get(opts, :include_attributes, true)
