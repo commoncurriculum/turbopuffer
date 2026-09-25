@@ -3,15 +3,14 @@ defmodule Turbopuffer.Client do
   HTTP client for the Turbopuffer API using Finch.
   """
 
+  alias Turbopuffer.Retry
+
   @regions %{
     gcp_us_central1: "https://gcp-us-central1.turbopuffer.com",
     gcp_us_east4: "https://gcp-us-east4.turbopuffer.com",
     gcp_europe_west4: "https://gcp-europe-west4.turbopuffer.com",
     gcp_asia_northeast1: "https://gcp-asia-northeast1.turbopuffer.com"
   }
-
-  @retry_statuses [408, 429, 500, 502, 503, 504]
-  @max_retry_delay 30_000
 
   defstruct [:api_key, :base_url, :finch_name, max_retries: 3, retry_delay: 500]
 
@@ -92,37 +91,13 @@ defmodule Turbopuffer.Client do
   defp send_with_retries(client, request, opts, attempt) do
     result = Finch.request(request, client.finch_name, opts)
 
-    if attempt < client.max_retries and retry?(result) do
-      Process.sleep(retry_delay(result, attempt, client.retry_delay))
+    if attempt < client.max_retries and Retry.retry?(result) do
+      Process.sleep(Retry.delay(result, attempt, client.retry_delay))
       send_with_retries(client, request, opts, attempt + 1)
     else
       result
     end
   end
-
-  @doc false
-  def retry?({:ok, %Finch.Response{status: status}}), do: status in @retry_statuses
-  def retry?({:error, %Mint.TransportError{}}), do: true
-  def retry?(_result), do: false
-
-  @doc false
-  def retry_delay(result, attempt, base) do
-    case retry_after(result) do
-      nil -> min(base * Integer.pow(2, attempt) + :rand.uniform(base + 1) - 1, @max_retry_delay)
-      seconds -> min(seconds * 1000, @max_retry_delay)
-    end
-  end
-
-  defp retry_after({:ok, %Finch.Response{headers: headers}}) do
-    with {_, value} <- List.keyfind(headers, "retry-after", 0),
-         {seconds, ""} <- Integer.parse(value) do
-      seconds
-    else
-      _ -> nil
-    end
-  end
-
-  defp retry_after(_result), do: nil
 
   @doc """
   Makes a GET request to the Turbopuffer API.
