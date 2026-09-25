@@ -1,14 +1,7 @@
 defmodule Turbopuffer.Integration.RerankTest do
-  use ExUnit.Case, async: true
+  use Turbopuffer.IntegrationCase, async: true
 
-  @moduletag :integration
-
-  setup do
-    client = Turbopuffer.new(api_key: System.fetch_env!("TURBOPUFFER_API_KEY"))
-    name = "turbopuffer-ex-test-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    namespace = Turbopuffer.namespace(client, name)
-    on_exit(fn -> Turbopuffer.delete_namespace(namespace) end)
-
+  setup %{namespace: namespace} do
     {:ok, _} =
       Turbopuffer.write(namespace,
         upsert_rows: [
@@ -24,7 +17,7 @@ defmodule Turbopuffer.Integration.RerankTest do
       %{rank_by: ["text", "BM25", "fox"], top_k: 1}
     ]
 
-    {:ok, namespace: namespace, queries: queries}
+    {:ok, queries: queries}
   end
 
   test "rerank_by: :rrf fuses the queries into one ranking", context do
