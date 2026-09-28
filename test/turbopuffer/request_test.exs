@@ -14,7 +14,7 @@ defmodule Turbopuffer.RequestTest do
              Client.get(client, "/v1/namespaces/#{namespace.name}/metadata")
 
     assert documents(namespace) == %{"a" => %{"text" => "héllo ✓"}}
-    assert {:ok, %{"status" => "ok"}} = Client.delete(client, path)
+    assert {:ok, %{"status" => "OK"}} = Client.delete(client, path)
   end
 
   test "turbopuffer's errors come back with their status and body, without a retry" do

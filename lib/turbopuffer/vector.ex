@@ -65,9 +65,12 @@ defmodule Turbopuffer.Vector do
     * `:return_affected_ids` - Return the ids that were upserted, patched, and deleted
     * `:branch_from_namespace` - Branch from another namespace
     * `:sharding` - Sharding configuration
-    * `:disable_backpressure` - Accept writes past the unindexed-data limit
+    * `:disable_backpressure` - Accept writes past the unindexed-data limit. turbopuffer takes it
+      only with upserts and deletes by id, and rejects it with patches, filter writes, or
+      conditions
 
-  Unknown options raise `ArgumentError`.
+  Empty `:upsert_rows`, `:patch_rows`, and `:deletes` are left out of the request, and turbopuffer
+  rejects a write with nothing in it. Unknown options raise `ArgumentError`.
 
   ## Examples
 

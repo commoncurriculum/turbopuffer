@@ -24,7 +24,7 @@ defmodule Turbopuffer.NamespaceTest do
        %{namespace: namespace} = context do
     {:ok, _} = Turbopuffer.write(namespace, upsert_rows: [%{id: 1, n: 1}])
 
-    assert {:ok, %{"status" => "ok"}} = Turbopuffer.delete_namespace(namespace)
+    assert {:ok, %{"status" => "OK"}} = Turbopuffer.delete_namespace(namespace)
 
     assert {:ok, %{namespaces: [], next_cursor: nil}} =
              Turbopuffer.list_namespaces(context.client, prefix: namespace.name)

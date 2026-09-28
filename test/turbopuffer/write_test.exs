@@ -53,25 +53,29 @@ defmodule Turbopuffer.WriteTest do
         %{id: "a", vector: [1.0, 0.0], color: "red", size: 1},
         %{id: "b", vector: [0.0, 1.0], color: "blue", size: 2}
       ],
-      distance_metric: "cosine_distance"
+      distance_metric: "cosine_distance",
+      disable_backpressure: true
     )
 
     assert %{"rows_patched" => 1, "rows_deleted" => 1} =
-             write!(namespace,
-               patch_rows: [%{id: "a", color: "pink"}],
-               deletes: ["b"],
-               disable_backpressure: true
-             )
+             write!(namespace, patch_rows: [%{id: "a", color: "pink"}], deletes: ["b"])
 
     assert documents(namespace) == %{
              "a" => %{"vector" => [1.0, 0.0], "color" => "pink", "size" => 1}
            }
   end
 
-  test "a write with nothing to write leaves the namespace as it is", %{namespace: namespace} do
-    write!(namespace, upsert_rows: [%{id: "a", color: "red"}])
+  test "empty lists are left out of a write, and turbopuffer rejects a write with nothing left",
+       %{namespace: namespace} do
+    write!(namespace, upsert_rows: [%{id: "a", color: "red"}, %{id: "b", color: "blue"}])
 
-    assert {:ok, _} = Turbopuffer.write(namespace, upsert_rows: [], patch_rows: [], deletes: [])
+    assert %{"rows_deleted" => 1} =
+             write!(namespace, upsert_rows: [], patch_rows: [], deletes: ["b"])
+
+    assert {:error, {:http_error, 400, %{"error" => message}}} =
+             Turbopuffer.write(namespace, upsert_rows: [], patch_rows: [], deletes: [])
+
+    assert message =~ "no writes"
     assert documents(namespace) == %{"a" => %{"color" => "red"}}
   end
 
@@ -81,7 +85,7 @@ defmodule Turbopuffer.WriteTest do
     assert %{"rows_affected" => 1} =
              write!(namespace,
                upsert_rows: [%{id: "a", version: 2}, %{id: "b", version: 0}],
-               upsert_condition: ["version", "Lt", ["$ref_new", "version"]]
+               upsert_condition: ["version", "Lt", %{"$ref_new" => "version"}]
              )
 
     assert %{"rows_affected" => 1} =
