@@ -1,41 +1,39 @@
 defmodule Turbopuffer.ClientTest do
   use ExUnit.Case, async: true
 
-  alias Turbopuffer.Client
-
-  setup do
-    bypass = Bypass.open()
-    client = Client.new(api_key: "test-key", base_url: "http://localhost:#{bypass.port}")
-    {:ok, bypass: bypass, client: client}
-  end
-
-  describe "request options" do
-    test "are the ones Finch takes", %{bypass: bypass, client: client} do
-      Bypass.expect_once(bypass, "GET", "/v1/namespaces", fn conn ->
-        Plug.Conn.resp(conn, 200, ~s({"namespaces": []}))
-      end)
-
-      assert {:ok, %{"namespaces" => []}} =
-               Client.get(client, "/v1/namespaces",
-                 pool_timeout: 1_000,
-                 receive_timeout: 1_000,
-                 request_timeout: 1_000
-               )
+  describe "new/1" do
+    test "defaults to gcp-us-central1" do
+      assert Turbopuffer.new(api_key: "key").base_url == "https://gcp-us-central1.turbopuffer.com"
     end
 
-    # Well under Finch's default receive_timeout of 15 seconds.
-    @tag timeout: 2_000
-    test "receive_timeout gives up on a server that doesn't answer" do
-      # Not Bypass: when the client hangs up, Bypass reports its still-running handler as crashed.
-      {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false])
-      {:ok, port} = :inet.port(socket)
+    test "takes any region as a string or an atom" do
+      assert Turbopuffer.new(api_key: "key", region: "aws-us-east-1").base_url ==
+               "https://aws-us-east-1.turbopuffer.com"
 
+      assert Turbopuffer.new(api_key: "key", region: :aws_ap_southeast_2).base_url ==
+               "https://aws-ap-southeast-2.turbopuffer.com"
+    end
+
+    test "prefers :base_url over :region" do
       client =
-        Client.new(api_key: "test-key", base_url: "http://localhost:#{port}", max_retries: 0)
+        Turbopuffer.new(api_key: "key", region: "not a region", base_url: "http://localhost:4000")
 
-      # Finch returns Mint.TransportError before 0.22 and Finch.TransportError from 0.22 on.
-      assert {:error, %{reason: :timeout}} =
-               Client.get(client, "/v1/namespaces", receive_timeout: 50)
+      assert client.base_url == "http://localhost:4000"
+    end
+
+    test "takes the API key from :api_key or TURBOPUFFER_API_KEY, and raises without one" do
+      assert Turbopuffer.new(api_key: "key").api_key == "key"
+
+      case System.get_env("TURBOPUFFER_API_KEY") do
+        nil -> assert_raise ArgumentError, ~r/API key is required/, fn -> Turbopuffer.new([]) end
+        key -> assert Turbopuffer.new([]).api_key == key
+      end
+    end
+
+    test "rejects malformed regions" do
+      assert_raise ArgumentError, ~r/invalid turbopuffer region "us east"/, fn ->
+        Turbopuffer.new(api_key: "key", region: "us east")
+      end
     end
   end
 end

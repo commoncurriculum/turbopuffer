@@ -93,7 +93,13 @@ defmodule Turbopuffer.Client do
 
   ## Options
 
-  `request/5`, `get/3`, `post/4`, and `delete/3` pass these to `Finch.request/3`:
+    * `:respond_async` - Lets turbopuffer run the operation in the background, for the operations
+      that can (`copy_from_namespace` and recall, see
+      https://turbopuffer.com/docs/api-overview#asynchronous-requests). The request still returns the
+      operation's result, polling for it until the operation finishes, as turbopuffer's own clients
+      do. turbopuffer may answer straight away instead
+
+  `request/5`, `get/3`, `post/4`, and `delete/3` pass the others to `Finch.request/3`:
 
     * `:pool_timeout` - Milliseconds to wait for a connection from the pool (Finch's default: 5_000)
     * `:receive_timeout` - Milliseconds to wait for each chunk of the response (Finch's default:
@@ -103,26 +109,55 @@ defmodule Turbopuffer.Client do
   """
   @spec request(t(), atom(), String.t(), map() | nil, Turbopuffer.request_opts()) :: response()
   def request(client, method, path, body \\ nil, opts \\ []) do
-    url = client.base_url <> path
+    {respond_async, opts} = Keyword.pop(opts, :respond_async, false)
 
     headers = [
       {"authorization", "Bearer #{client.api_key}"},
       {"content-type", "application/json"},
       {"accept", "application/json"}
+      | if(respond_async, do: [{"prefer", "respond-async"}], else: [])
     ]
 
     encoded_body = if body, do: @json_library.encode!(body), else: nil
 
-    request = Finch.build(method, url, headers, encoded_body)
+    request = Finch.build(method, client.base_url <> path, headers, encoded_body)
 
     with {:ok, response} <- send_with_retries(client, request, opts, 0),
          {:ok, decoded_body} <- decode_response(response) do
-      if response.status in 200..299 do
-        {:ok, decoded_body}
-      else
-        {:error, {:http_error, response.status, decoded_body}}
+      case {response.status, List.keyfind(response.headers, "location", 0)} do
+        {202, {_, location}} when respond_async ->
+          await(client, operation_path(location), opts, 0)
+
+        {status, _} when status in 200..299 ->
+          {:ok, decoded_body}
+
+        {status, _} ->
+          {:error, {:http_error, status, decoded_body}}
       end
     end
+  end
+
+  # turbopuffer keeps an operation's result for an hour after it finishes, so polling can back off.
+  defp await(client, path, opts, attempt) do
+    case request(client, :get, path, nil, opts) do
+      {:ok, %{"status" => "running"}} ->
+        Process.sleep(min(250 * Integer.pow(2, attempt), 5_000))
+        await(client, path, opts, attempt + 1)
+
+      {:ok, %{"status" => "finished", "result" => %{"success" => result}}} ->
+        {:ok, result}
+
+      {:ok, %{"status" => "finished", "result" => %{"error" => error}}} ->
+        {:error, {:http_error, error["status_code"], error["detail"]}}
+
+      other ->
+        other
+    end
+  end
+
+  defp operation_path(location) do
+    %URI{path: path, query: query} = URI.parse(location)
+    if query, do: path <> "?" <> query, else: path
   end
 
   defp send_with_retries(client, request, opts, attempt) do

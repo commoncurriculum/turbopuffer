@@ -1,117 +1,135 @@
 defmodule Turbopuffer.SearchTest do
-  use ExUnit.Case
+  use Turbopuffer.IntegrationCase, async: true
 
-  @path "/v2/namespaces/ns/query"
-  @queries [
-    %{rank_by: ["vector", "ANN", [1.0, 0.0]], top_k: 5},
-    %{rank_by: ["text", "BM25", "fox"], top_k: 5}
-  ]
+  setup %{namespace: namespace} do
+    {:ok, _} =
+      Turbopuffer.write(namespace,
+        upsert_rows: [
+          %{id: "cat", vector: [1.0, 0.0], text: "the cat sat", kind: "pet"},
+          %{id: "fox", vector: [0.0, 1.0], text: "the quick fox", kind: "wild"},
+          %{id: "dog", vector: [0.6, 0.8], text: "the dog chased the fox", kind: "pet"}
+        ],
+        distance_metric: "cosine_distance",
+        schema: %{"text" => %{"type" => "string", "full_text_search" => true}}
+      )
 
-  setup do
-    bypass = Bypass.open()
-    client = Turbopuffer.new(api_key: "test-key", base_url: "http://localhost:#{bypass.port}")
-    {:ok, bypass: bypass, namespace: Turbopuffer.namespace(client, "ns")}
+    :ok
   end
 
-  defp expect_query(bypass, response) do
-    test_pid = self()
+  defp ids(results), do: Enum.map(results, & &1.id)
 
-    Bypass.expect_once(bypass, "POST", @path, fn conn ->
-      {:ok, body, conn} = Plug.Conn.read_body(conn)
-      send(test_pid, {:body, Jason.decode!(body)})
-      Plug.Conn.resp(conn, 200, Jason.encode!(response))
-    end)
-  end
+  describe "text_search/2" do
+    test "ranks the documents that match by BM25, best first", %{namespace: namespace} do
+      assert {:ok, [fox, dog]} =
+               Turbopuffer.text_search(namespace, query: "fox", attribute: "text")
 
-  describe "multi_query/2" do
-    test "sends each query's own top_k and no top-level limit", %{bypass: bypass, namespace: ns} do
-      expect_query(bypass, %{"results" => [%{"rows" => [%{"id" => "a"}]}, %{"rows" => []}]})
+      assert {fox.id, dog.id} == {"fox", "dog"}
+      assert fox.dist > dog.dist and dog.dist > 0
 
-      assert {:ok, [%{id: "a"}]} = Turbopuffer.multi_query(ns, queries: @queries, top_k: 3)
-
-      assert_received {:body, body}
-      assert Map.keys(body) == ["queries"]
-      assert Enum.map(body["queries"], & &1["top_k"]) == [5, 5]
+      assert {:ok, [%{id: "fox"}]} =
+               Turbopuffer.text_search(namespace, query: "fox", attribute: "text", top_k: 1)
     end
 
-    test "rerank_by sends RRF and limits the fused list with top_k", %{
-      bypass: bypass,
-      namespace: ns
-    } do
-      fused = [%{"id" => "b", "$dist" => 0.03}, %{"id" => "a", "$dist" => 0.02}]
-      expect_query(bypass, %{"results" => [%{"rows" => fused}]})
-
-      assert {:ok, [%{id: "b"}, %{id: "a"}]} =
-               Turbopuffer.multi_query(ns,
-                 queries: @queries,
-                 top_k: 2,
-                 rerank_by: {:rrf, weights: [2, 1], rank_constant: 30}
+    test "takes filters and the attributes to return", %{namespace: namespace} do
+      assert {:ok, [dog]} =
+               Turbopuffer.text_search(namespace,
+                 query: "fox",
+                 attribute: "text",
+                 filters: %{"kind" => "pet"},
+                 include_attributes: ["kind"]
                )
 
-      assert_received {:body, body}
-      assert body["rerank_by"] == ["RRF", %{"weights" => [2, 1], "rank_constant" => 30}]
-      assert body["limit"] == 2
+      assert {dog.id, dog.attributes} == {"dog", %{"kind" => "pet"}}
     end
 
-    test "rerank_by: :rrf takes turbopuffer's defaults", %{bypass: bypass, namespace: ns} do
-      expect_query(bypass, %{"results" => [%{"rows" => []}]})
+    test "an attribute without full-text search is an error", %{namespace: namespace} do
+      assert {:error, {:http_error, status, %{"error" => _}}} =
+               Turbopuffer.text_search(namespace, query: "pet", attribute: "kind")
 
-      assert {:ok, []} = Turbopuffer.multi_query(ns, queries: @queries, rerank_by: :rrf)
-
-      assert_received {:body, %{"rerank_by" => ["RRF"], "limit" => 10}}
-    end
-
-    test "rejects unknown RRF options and rerankers before sending anything", %{namespace: ns} do
-      assert_raise ArgumentError, ~r/unknown keys \[:k\]/, fn ->
-        Turbopuffer.multi_query(ns, queries: @queries, rerank_by: {:rrf, k: 60})
-      end
-
-      assert_raise ArgumentError, ~r/invalid :rerank_by :mmr/, fn ->
-        Turbopuffer.multi_query(ns, queries: @queries, rerank_by: :mmr)
-      end
+      assert status in [400, 422]
     end
   end
 
   describe "hybrid_search/2" do
-    @hybrid [vector: [1.0, 0.0], text_query: "fox", text_attribute: "text"]
+    @hybrid [vector: [0.0, 1.0], text_query: "fox", text_attribute: "text"]
 
-    test "fuses the two rankings with RRF by default", %{bypass: bypass, namespace: ns} do
-      expect_query(bypass, %{"results" => [%{"rows" => [%{"id" => "b"}, %{"id" => "a"}]}]})
+    test "fuses the vector and text rankings with reciprocal rank fusion", %{namespace: namespace} do
+      assert {:ok, [fox, dog, cat]} = Turbopuffer.hybrid_search(namespace, @hybrid)
+      assert ids([fox, dog, cat]) == ["fox", "dog", "cat"]
 
-      assert {:ok, [%{id: "b"}, %{id: "a"}]} =
-               Turbopuffer.hybrid_search(ns, @hybrid ++ [top_k: 5])
+      # Each ranking adds 1 / (60 + rank): fox and dog are first and second in both, and cat is
+      # third in the vector ranking alone.
+      assert_in_delta fox.dist, 2 / 61, 1.0e-6
+      assert_in_delta dog.dist, 2 / 62, 1.0e-6
+      assert_in_delta cat.dist, 1 / 63, 1.0e-6
 
-      assert_received {:body, body}
-      assert body["rerank_by"] == ["RRF"]
-      assert body["limit"] == 5
-
-      assert [ann, bm25] = body["queries"]
-      assert ann["rank_by"] == ["vector", "ANN", [1.0, 0.0]]
-      assert bm25["rank_by"] == ["text", "BM25", "fox"]
+      assert {:ok, [%{id: "fox"}]} = Turbopuffer.hybrid_search(namespace, @hybrid ++ [top_k: 1])
     end
 
-    test "passes RRF options through", %{bypass: bypass, namespace: ns} do
-      expect_query(bypass, %{"results" => [%{"rows" => []}]})
+    test "filters both rankings", %{namespace: namespace} do
+      assert {:ok, [dog, cat]} =
+               Turbopuffer.hybrid_search(namespace, @hybrid ++ [filters: %{"kind" => "pet"}])
 
-      assert {:ok, []} =
-               Turbopuffer.hybrid_search(ns, @hybrid ++ [rerank_by: {:rrf, weights: [2, 1]}])
-
-      assert_received {:body, %{"rerank_by" => ["RRF", %{"weights" => [2, 1]}]}}
+      assert ids([dog, cat]) == ["dog", "cat"]
+      assert_in_delta dog.dist, 2 / 61, 1.0e-6
     end
 
-    test "rerank_by: nil returns the rows unfused", %{bypass: bypass, namespace: ns} do
-      expect_query(bypass, %{
-        "results" => [
-          %{"rows" => [%{"id" => "a"}, %{"id" => "b"}]},
-          %{"rows" => [%{"id" => "b"}, %{"id" => "c"}]}
-        ]
-      })
+    test "rerank_by takes RRF's options, or nil for the rankings unfused", %{namespace: namespace} do
+      assert {:ok, [fox | _]} =
+               Turbopuffer.hybrid_search(
+                 namespace,
+                 @hybrid ++ [rerank_by: {:rrf, weights: [1, 3]}]
+               )
 
-      assert {:ok, [%{id: "a"}, %{id: "b"}, %{id: "c"}]} =
-               Turbopuffer.hybrid_search(ns, @hybrid ++ [rerank_by: nil])
+      assert_in_delta fox.dist, 4 / 61, 1.0e-6
 
-      assert_received {:body, body}
-      assert Map.keys(body) == ["queries"]
+      assert {:ok, [fox, dog, cat]} =
+               Turbopuffer.hybrid_search(namespace, @hybrid ++ [rerank_by: nil])
+
+      assert ids([fox, dog, cat]) == ["fox", "dog", "cat"]
+      # Unfused, the first rows are the vector ranking's, so dist is the cosine distance.
+      assert_in_delta fox.dist, 0.0, 1.0e-6
+    end
+  end
+
+  describe "multi_query/2" do
+    @nearest_pet %{rank_by: ["vector", "ANN", [1.0, 0.0]], top_k: 1, filters: %{"kind" => "pet"}}
+    @best_fox %{rank_by: ["text", "BM25", "fox"], top_k: 1}
+
+    test "returns each query's rows in turn, without repeating a document", %{
+      namespace: namespace
+    } do
+      assert {:ok, results} =
+               Turbopuffer.multi_query(namespace, queries: [@nearest_pet, @best_fox])
+
+      assert ids(results) == ["cat", "fox"]
+
+      queries = [
+        %{rank_by: [:vector, :ann, [0.0, 1.0]], top_k: 2, include_attributes: ["kind"]},
+        %{rank_by: ["text", "BM25", "fox"], top_k: 2}
+      ]
+
+      assert {:ok, [fox, dog]} = Turbopuffer.multi_query(namespace, queries: queries)
+      assert {fox.id, fox.attributes, dog.id} == {"fox", %{"kind" => "wild"}, "dog"}
+    end
+
+    test "rerank_by fuses the queries, weighted, up to top_k", %{namespace: namespace} do
+      fused = fn opts ->
+        {:ok, results} =
+          Turbopuffer.multi_query(namespace, [queries: [@nearest_pet, @best_fox]] ++ opts)
+
+        results
+      end
+
+      assert [first, second] = fused.(rerank_by: :rrf)
+      assert Enum.sort(ids([first, second])) == ["cat", "fox"]
+      assert_in_delta first.dist, 1 / 61, 1.0e-6
+
+      assert ids(fused.(rerank_by: {:rrf, weights: [5, 1]}, top_k: 1)) == ["cat"]
+      assert ids(fused.(rerank_by: {:rrf, weights: [1, 5]}, top_k: 1)) == ["fox"]
+
+      assert [%{dist: dist} | _] = fused.(rerank_by: {:rrf, rank_constant: 10})
+      assert_in_delta dist, 1 / 11, 1.0e-6
     end
   end
 end

@@ -17,6 +17,8 @@ defmodule Turbopuffer.Search do
     :rerank_by
   ]
   @multi_query_options [:queries, :top_k, :include_attributes, :rerank_by]
+  @query_keys [:rank_by, :top_k, :include_attributes, :filters]
+  @aggregate_options [:aggregate_by, :group_by, :top_k, :filters, :consistency]
 
   @doc """
   Performs a full-text search using BM25 ranking.
@@ -42,26 +44,21 @@ defmodule Turbopuffer.Search do
     Keyword.validate!(opts, @text_options)
     query = Keyword.fetch!(opts, :query)
     attribute = Keyword.fetch!(opts, :attribute)
-    path = "/v2/namespaces/#{namespace.name}/query"
 
-    body = build_text_search_body(opts, query, attribute)
+    body =
+      Query.put_filters(
+        %{
+          "rank_by" => [attribute, "BM25", query],
+          "top_k" => Keyword.get(opts, :top_k, 10),
+          "include_attributes" =>
+            Query.normalize_include_attributes(Keyword.get(opts, :include_attributes, true))
+        },
+        opts[:filters]
+      )
 
     namespace.client
-    |> Client.post(path, body)
+    |> Client.post("/v2/namespaces/#{namespace.name}/query", body)
     |> Query.results()
-  end
-
-  defp build_text_search_body(opts, query, attribute) do
-    base_body = %{
-      "rank_by" => [attribute, "BM25", query],
-      "top_k" => Keyword.get(opts, :top_k, 10),
-      "include_attributes" => Query.normalize_include_attributes(Keyword.get(opts, :include_attributes, true))
-    }
-
-    case Keyword.get(opts, :filters) do
-      nil -> base_body
-      filters -> Map.put(base_body, "filters", Query.format_filters(filters))
-    end
   end
 
   @doc """
@@ -114,7 +111,6 @@ defmodule Turbopuffer.Search do
     include_attributes = Keyword.get(opts, :include_attributes, true)
     filters = Keyword.get(opts, :filters)
 
-    # Use multi_query for hybrid search
     queries = [
       %{
         rank_by: RankBy.ann(vector_attribute, vector),
@@ -146,9 +142,10 @@ defmodule Turbopuffer.Search do
   `:top_k` limits the fused list, and each row's `dist` is its RRF score.
 
   ## Options
-    * `:queries` - List of query configurations
+    * `:queries` - Up to 16 queries, each a map with `:rank_by` and optionally `:top_k`
+      (default: 10), `:include_attributes`, and `:filters`. Other keys raise `ArgumentError`
     * `:top_k` - Number of fused results to return with `:rerank_by` (default: 10)
-    * `:include_attributes` - Attributes to include in results
+    * `:include_attributes` - Attributes to include in results, for queries that don't set their own
     * `:rerank_by` - `:rrf`, or `{:rrf, rank_constant: 60, weights: [2, 1]}` with one weight per query
 
   ## Examples
@@ -208,6 +205,55 @@ defmodule Turbopuffer.Search do
     end
   end
 
+  @doc """
+  Aggregates the documents that match `:filters`, or every document in the namespace.
+
+  Returns a map from each aggregation's label to its value, or with `:group_by`, a list with a map
+  for each group: its `:group_by` attributes and aggregations, ordered by the `:group_by` attributes.
+
+  ## Options
+    * `:aggregate_by` - A map from labels to aggregate functions (required): `["Count"]`, or
+      `["Sum", attribute]` for an int, uint, or float attribute. Up to 8
+    * `:group_by` - Attributes to group the documents by, aggregating each group
+    * `:top_k` - The number of groups to return, up to 10,000
+    * `:filters` - Metadata filters to apply
+    * `:consistency` - `:strong` (the default) or `:eventual`
+
+  ## Examples
+
+      {:ok, %{"count" => 42, "total" => 128}} =
+        Turbopuffer.Search.aggregate(namespace,
+          aggregate_by: %{"count" => ["Count"], "total" => ["Sum", "price"]}
+        )
+
+      {:ok, [%{"category" => "news", "count" => 2}, %{"category" => "sports", "count" => 5}]} =
+        Turbopuffer.Search.aggregate(namespace,
+          aggregate_by: %{"count" => ["Count"]},
+          group_by: ["category"]
+        )
+  """
+  @spec aggregate(Namespace.t(), Turbopuffer.aggregate_opts()) ::
+          {:ok, map() | [map()]} | {:error, term()}
+  def aggregate(%Namespace{} = namespace, opts) do
+    Keyword.validate!(opts, @aggregate_options)
+
+    body =
+      %{"aggregate_by" => Keyword.fetch!(opts, :aggregate_by)}
+      |> put("group_by", opts[:group_by])
+      |> put("top_k", opts[:top_k])
+      |> Query.put_filters(opts[:filters])
+      |> Query.put_consistency(opts[:consistency])
+
+    case Client.post(namespace.client, "/v2/namespaces/#{namespace.name}/query", body) do
+      {:ok, %{"aggregation_groups" => groups}} -> {:ok, groups}
+      {:ok, %{"aggregations" => aggregations}} -> {:ok, aggregations}
+      other -> other
+    end
+  end
+
+  defp put(body, _key, nil), do: body
+  defp put(body, key, value), do: Map.put(body, key, value)
+
   defp rerank_by(nil), do: nil
   defp rerank_by(:rrf), do: ["RRF"]
 
@@ -220,26 +266,31 @@ defmodule Turbopuffer.Search do
     raise ArgumentError, "invalid :rerank_by #{inspect(other)}, expected :rrf or {:rrf, keyword}"
   end
 
-  defp format_query(%{rank_by: rank_by} = query, include_attributes) do
-    base_query = %{
-      "rank_by" => format_rank_by(rank_by),
-      "top_k" => Map.get(query, :top_k, 10),
-      "include_attributes" => Query.normalize_include_attributes(Map.get(query, :include_attributes, include_attributes))
-    }
+  defp format_query(query, include_attributes) when is_map(query) do
+    case Map.keys(query) -- @query_keys do
+      [] ->
+        Query.put_filters(
+          %{
+            "rank_by" => format_rank_by(Map.fetch!(query, :rank_by)),
+            "top_k" => Map.get(query, :top_k, 10),
+            "include_attributes" =>
+              Query.normalize_include_attributes(
+                Map.get(query, :include_attributes, include_attributes)
+              )
+          },
+          query[:filters]
+        )
 
-    case Map.get(query, :filters) do
-      nil -> base_query
-      filters -> Map.put(base_query, "filters", Query.format_filters(filters))
+      unknown ->
+        raise ArgumentError,
+              "unknown keys #{inspect(unknown)} in query #{inspect(query)}, " <>
+                "expected #{inspect(@query_keys)}"
     end
   end
 
   # Pattern match on rank_by formats
   defp format_rank_by([:vector, :ann, vector]) do
     ["vector", "ANN", vector]
-  end
-
-  defp format_rank_by([attribute, "BM25", text]) when is_binary(attribute) do
-    [attribute, "BM25", text]
   end
 
   defp format_rank_by([attribute, method, value]) do
