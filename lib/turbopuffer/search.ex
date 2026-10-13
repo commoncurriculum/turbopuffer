@@ -239,8 +239,8 @@ defmodule Turbopuffer.Search do
 
     body =
       %{"aggregate_by" => Keyword.fetch!(opts, :aggregate_by)}
-      |> put("group_by", opts[:group_by])
-      |> put("top_k", opts[:top_k])
+      |> Query.put("group_by", opts[:group_by])
+      |> Query.put("top_k", opts[:top_k])
       |> Query.put_filters(opts[:filters])
       |> Query.put_consistency(opts[:consistency])
 
@@ -250,9 +250,6 @@ defmodule Turbopuffer.Search do
       other -> other
     end
   end
-
-  defp put(body, _key, nil), do: body
-  defp put(body, key, value), do: Map.put(body, key, value)
 
   defp rerank_by(nil), do: nil
   defp rerank_by(:rrf), do: ["RRF"]

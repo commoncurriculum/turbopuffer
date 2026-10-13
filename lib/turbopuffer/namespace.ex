@@ -109,12 +109,13 @@ defmodule Turbopuffer.Namespace do
   """
   @spec recall(t(), keyword()) :: {:ok, map()} | {:error, term()}
   def recall(%__MODULE__{} = namespace, opts \\ []) do
+    Keyword.validate!(opts, [:num, :top_k, :filters, :rank_by])
+
     body =
-      opts
-      |> Keyword.validate!([:num, :top_k, :filters, :rank_by])
-      |> Keyword.delete(:filters)
-      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-      |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
+      %{}
+      |> Query.put("num", opts[:num])
+      |> Query.put("top_k", opts[:top_k])
+      |> Query.put("rank_by", opts[:rank_by])
       |> Query.put_filters(opts[:filters])
 
     Client.post(namespace.client, "/v1/namespaces/#{namespace.name}/_debug/recall", body,

@@ -207,54 +207,45 @@ defmodule Turbopuffer.Vector do
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def query(%Namespace{} = namespace, opts) do
     Keyword.validate!(opts, @query_options)
-    {rank_by, vector, vector_attribute} = rank_by(opts)
-
-    if Keyword.has_key?(opts, :limit) and Keyword.has_key?(opts, :top_k) do
-      raise ArgumentError, "turbopuffer takes :top_k or :limit, not both"
-    end
+    {body, vector_attribute} = ranking(opts)
 
     body =
-      %{"rank_by" => rank_by}
-      |> Map.merge(limit(opts))
-      |> Map.merge(attributes(opts, vector, vector_attribute))
+      body
+      |> Query.put_limit(opts)
       |> Query.put_filters(opts[:filters])
-      |> put_option("offset", opts[:offset], & &1)
-      |> put_option("compute_attributes", opts[:compute_attributes], & &1)
-      |> put_option("vector_encoding", opts[:vector_encoding], &encoding/1)
+      |> Query.put("offset", opts[:offset])
+      |> Query.put("compute_attributes", opts[:compute_attributes])
+      |> Query.put_vector_encoding(opts[:vector_encoding])
       |> Query.put_consistency(opts[:consistency])
 
     namespace.client
     |> Client.post("/v2/namespaces/#{namespace.name}/query", body)
-    |> Query.results(if is_list(vector), do: vector_attribute)
+    |> Query.results(vector_attribute)
   end
 
-  defp rank_by(opts) do
-    case {Keyword.fetch(opts, :rank_by), Keyword.fetch(opts, :vector)} do
-      {{:ok, rank_by}, :error} ->
-        if opts[:include_vectors] || Keyword.has_key?(opts, :vector_attribute) do
+  defp ranking(opts) do
+    Query.exclusive!(opts, :vector, :rank_by)
+
+    case Keyword.fetch(opts, :vector) do
+      {:ok, vector} ->
+        vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
+
+        body =
+          %{"rank_by" => RankBy.ann(vector_attribute, vector)}
+          |> Map.merge(attributes(opts, vector, vector_attribute))
+
+        {body, if(is_list(vector), do: vector_attribute)}
+
+      :error ->
+        if opts[:rank_by] == nil, do: raise(ArgumentError, "query takes a :vector or a :rank_by")
+
+        if opts[:include_vectors] || opts[:vector_attribute] do
           raise ArgumentError,
                 ":include_vectors and :vector_attribute go with :vector, not :rank_by, " <>
                   "so list the vector attribute in :include_attributes instead"
         end
 
-        {rank_by, nil, nil}
-
-      {:error, {:ok, vector}} ->
-        vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
-        {RankBy.ann(vector_attribute, vector), vector, vector_attribute}
-
-      {:error, :error} ->
-        raise ArgumentError, "query takes a :vector or a :rank_by"
-
-      {{:ok, _rank_by}, {:ok, _vector}} ->
-        raise ArgumentError, "query takes a :vector or a :rank_by, not both"
-    end
-  end
-
-  defp limit(opts) do
-    case Keyword.fetch(opts, :limit) do
-      {:ok, limit} -> %{"limit" => limit}
-      :error -> %{"top_k" => Keyword.get(opts, :top_k, 10)}
+        {Query.put_attributes(%{"rank_by" => opts[:rank_by]}, opts), nil}
     end
   end
 
@@ -271,10 +262,7 @@ defmodule Turbopuffer.Vector do
               "so add that attribute to :include_attributes instead"
     end
 
-    if exclude && Keyword.has_key?(opts, :include_attributes) do
-      raise ArgumentError,
-            "turbopuffer takes :include_attributes or :exclude_attributes, not both"
-    end
+    Query.exclusive!(opts, :include_attributes, :exclude_attributes)
 
     case include do
       true when include_vectors and is_list(exclude) ->
@@ -305,16 +293,6 @@ defmodule Turbopuffer.Vector do
       attributes ->
         %{"include_attributes" => attributes}
     end
-  end
-
-  defp put_option(body, _key, nil, _format), do: body
-  defp put_option(body, key, value, format), do: Map.put(body, key, format.(value))
-
-  defp encoding(:float), do: "float"
-  defp encoding(:base64), do: "base64"
-
-  defp encoding(other) do
-    raise ArgumentError, "invalid :vector_encoding #{inspect(other)}, expected :float or :base64"
   end
 
   # Format vectors for write operations - attributes are flattened

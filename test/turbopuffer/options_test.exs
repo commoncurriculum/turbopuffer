@@ -113,7 +113,7 @@ defmodule Turbopuffer.OptionsTest do
   end
 
   test "query options turbopuffer can't combine raise", %{namespace: namespace} do
-    assert_raise ArgumentError, ~r/a :vector or a :rank_by, not both/, fn ->
+    assert_raise ArgumentError, ~r/:vector or :rank_by, not both/, fn ->
       Turbopuffer.query(namespace, vector: [0.1], rank_by: ["id", "asc"])
     end
 
