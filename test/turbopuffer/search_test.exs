@@ -96,21 +96,31 @@ defmodule Turbopuffer.SearchTest do
     @nearest_pet %{rank_by: ["vector", "ANN", [1.0, 0.0]], top_k: 1, filters: %{"kind" => "pet"}}
     @best_fox %{rank_by: ["text", "BM25", "fox"], top_k: 1}
 
-    test "returns each query's rows in turn, without repeating a document", %{
-      namespace: namespace
-    } do
+    test "returns each query's results, in the order of the queries", %{namespace: namespace} do
       assert {:ok, results} =
                Turbopuffer.multi_query(namespace, queries: [@nearest_pet, @best_fox])
 
-      assert ids(results) == ["cat", "fox"]
+      assert Enum.map(results, &ids/1) == [["cat"], ["fox"]]
 
       queries = [
         %{rank_by: [:vector, :ann, [0.0, 1.0]], top_k: 2, include_attributes: ["kind"]},
         %{rank_by: ["text", "BM25", "fox"], top_k: 2}
       ]
 
-      assert {:ok, [fox, dog]} = Turbopuffer.multi_query(namespace, queries: queries)
+      assert {:ok, [[fox, dog], text_results]} =
+               Turbopuffer.multi_query(namespace, queries: queries, consistency: :eventual)
+
       assert {fox.id, fox.attributes, dog.id} == {"fox", %{"kind" => "wild"}, "dog"}
+      assert Enum.sort(ids(text_results)) == ["dog", "fox"]
+    end
+
+    test "vector_encoding: :base64 encodes every query's vectors", %{namespace: namespace} do
+      query = %{rank_by: ["vector", "ANN", [1.0, 0.0]], top_k: 1, include_attributes: ["vector"]}
+
+      assert {:ok, [[%{id: "cat", vector: encoded}]]} =
+               Turbopuffer.multi_query(namespace, queries: [query], vector_encoding: :base64)
+
+      assert Base.decode64!(encoded) == <<1.0::float-32-little, 0.0::float-32-little>>
     end
 
     test "rerank_by fuses the queries, weighted, up to top_k", %{namespace: namespace} do
@@ -130,6 +140,8 @@ defmodule Turbopuffer.SearchTest do
 
       assert [%{dist: dist} | _] = fused.(rerank_by: {:rrf, rank_constant: 10})
       assert_in_delta dist, 1 / 11, 1.0e-6
+
+      assert [_] = fused.(rerank_by: :rrf, limit: 1)
     end
   end
 end
