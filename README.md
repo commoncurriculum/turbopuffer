@@ -188,8 +188,13 @@ queries = [
   %{rank_by: ["content", "BM25", "search terms"], top_k: 10}
 ]
 
+# One list of results for each query
+{:ok, [vector_results, text_results]} = Turbopuffer.multi_query(namespace, queries: queries)
+
+# Or one list, fused with reciprocal rank fusion
 {:ok, results} = Turbopuffer.multi_query(namespace,
   queries: queries,
+  rerank_by: :rrf,
   top_k: 20
 )
 ```

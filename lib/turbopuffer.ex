@@ -149,8 +149,11 @@ defmodule Turbopuffer do
   @type multi_query_opts :: [
           {:queries, [map()]}
           | {:top_k, pos_integer()}
+          | {:limit, pos_integer() | map()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:rerank_by, rerank_by()}
+          | {:consistency, :strong | :eventual}
+          | {:vector_encoding, :float | :base64}
         ]
 
   @doc """
@@ -298,13 +301,16 @@ defmodule Turbopuffer do
   defdelegate hybrid_search(namespace, opts), to: Search, as: :hybrid
 
   @doc """
-  Runs several queries in one request, optionally fusing them with reciprocal rank fusion.
-  See `Turbopuffer.Search.multi_query/2`.
+  Runs several queries in one request, returning each query's results, or one list fused with
+  reciprocal rank fusion. See `Turbopuffer.Search.multi_query/2`.
 
   ## Options
     * `:queries` - List of query configurations
     * `:top_k` - Number of fused results with `:rerank_by`
+    * `:limit` - turbopuffer's `limit` for the fused results, instead of `:top_k`
     * `:rerank_by` - `:rrf`, or `{:rrf, rank_constant: 60, weights: [2, 1]}`
+    * `:consistency` - `:strong` (the default) or `:eventual`
+    * `:vector_encoding` - `:float` (the default) or `:base64`
 
   ## Examples
 
@@ -315,7 +321,7 @@ defmodule Turbopuffer do
       {:ok, results} = Turbopuffer.multi_query(namespace, queries: queries, rerank_by: :rrf)
   """
   @spec multi_query(Namespace.t(), multi_query_opts()) ::
-          {:ok, query_response()} | {:error, term()}
+          {:ok, query_response() | [query_response()]} | {:error, term()}
   defdelegate multi_query(namespace, opts), to: Search
 
   @doc """

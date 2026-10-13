@@ -80,6 +80,10 @@ defmodule Turbopuffer.OptionsTest do
     assert_raise ArgumentError, ~r/invalid :rerank_by :mmr/, fn ->
       Turbopuffer.multi_query(namespace, queries: [], rerank_by: :mmr)
     end
+
+    assert_raise ArgumentError, ~r/invalid :vector_encoding :hex/, fn ->
+      Turbopuffer.multi_query(namespace, queries: [], vector_encoding: :hex)
+    end
   end
 
   test "attribute options turbopuffer can't combine raise", %{namespace: namespace} do
@@ -97,6 +101,16 @@ defmodule Turbopuffer.OptionsTest do
         vector_attribute: "text",
         include_vectors: true
       )
+    end
+  end
+
+  test "multi_query's limit goes with rerank_by and instead of top_k", %{namespace: namespace} do
+    assert_raise ArgumentError, ~r/takes :rerank_by/, fn ->
+      Turbopuffer.multi_query(namespace, queries: [], limit: 5)
+    end
+
+    assert_raise ArgumentError, ~r/:top_k or :limit, not both/, fn ->
+      Turbopuffer.multi_query(namespace, queries: [], rerank_by: :rrf, top_k: 5, limit: 5)
     end
   end
 

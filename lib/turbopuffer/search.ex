@@ -16,7 +16,15 @@ defmodule Turbopuffer.Search do
     :filters,
     :rerank_by
   ]
-  @multi_query_options [:queries, :top_k, :include_attributes, :rerank_by]
+  @multi_query_options [
+    :queries,
+    :top_k,
+    :limit,
+    :include_attributes,
+    :rerank_by,
+    :consistency,
+    :vector_encoding
+  ]
   @query_keys [:rank_by, :top_k, :include_attributes, :filters]
   @aggregate_options [:aggregate_by, :group_by, :top_k, :filters, :consistency]
 
@@ -126,27 +134,35 @@ defmodule Turbopuffer.Search do
       }
     ]
 
-    multi_query(namespace,
-      queries: queries,
-      top_k: top_k,
-      rerank_by: Keyword.get(opts, :rerank_by, :rrf)
-    )
+    case Keyword.get(opts, :rerank_by, :rrf) do
+      nil ->
+        with {:ok, results} <- multi_query(namespace, queries: queries) do
+          {:ok, results |> Enum.concat() |> Enum.uniq_by(& &1.id)}
+        end
+
+      rerank_by ->
+        multi_query(namespace, queries: queries, top_k: top_k, rerank_by: rerank_by)
+    end
   end
 
   @doc """
   Runs several queries in one request.
 
-  Without `:rerank_by`, returns the queries' rows one query after another, with duplicate ids
-  removed, and each query's own `top_k` applies. With `rerank_by: :rrf`, turbopuffer fuses the
-  rankings with reciprocal rank fusion (https://turbopuffer.com/docs/query#reciprocal-rank-fusion),
-  `:top_k` limits the fused list, and each row's `dist` is its RRF score.
+  Without `:rerank_by`, returns a list of results for each query, in the order of `:queries`, and
+  each query's own `top_k` applies. With `rerank_by: :rrf`, turbopuffer fuses the rankings with
+  reciprocal rank fusion (https://turbopuffer.com/docs/query#reciprocal-rank-fusion) into one list
+  of results, `:top_k` or `:limit` limits it, and each row's `dist` is its RRF score.
 
   ## Options
     * `:queries` - Up to 16 queries, each a map with `:rank_by` and optionally `:top_k`
       (default: 10), `:include_attributes`, and `:filters`. Other keys raise `ArgumentError`
     * `:top_k` - Number of fused results to return with `:rerank_by` (default: 10)
+    * `:limit` - turbopuffer's `limit` for the fused results, instead of `:top_k`: a number, or
+      `%{total: n, per: %{attributes: [...], limit: m}}`. Only with `:rerank_by`
     * `:include_attributes` - Attributes to include in results, for queries that don't set their own
     * `:rerank_by` - `:rrf`, or `{:rrf, rank_constant: 60, weights: [2, 1]}` with one weight per query
+    * `:consistency` - `:strong` (the default) or `:eventual`, for every query
+    * `:vector_encoding` - `:float` (the default) or `:base64`, for every query
 
   ## Examples
 
@@ -155,10 +171,8 @@ defmodule Turbopuffer.Search do
         %{rank_by: ["content", "BM25", "search terms"], top_k: 10}
       ]
 
-      Turbopuffer.Search.multi_query(namespace,
-        queries: queries,
-        top_k: 20
-      )
+      {:ok, [vector_results, text_results]} =
+        Turbopuffer.Search.multi_query(namespace, queries: queries)
 
       # Fuse the two rankings, weighting the vector search twice as heavily
       Turbopuffer.Search.multi_query(namespace,
@@ -168,12 +182,22 @@ defmodule Turbopuffer.Search do
       )
   """
   @spec multi_query(Namespace.t(), Turbopuffer.multi_query_opts()) ::
-          {:ok, Turbopuffer.query_response()} | {:error, term()}
+          {:ok, Turbopuffer.query_response() | [Turbopuffer.query_response()]} | {:error, term()}
   def multi_query(%Namespace{} = namespace, opts) do
     Keyword.validate!(opts, @multi_query_options)
     queries = Keyword.fetch!(opts, :queries)
-    top_k = Keyword.get(opts, :top_k, 10)
     include_attributes = Keyword.get(opts, :include_attributes, true)
+    rerank_by = rerank_by(Keyword.get(opts, :rerank_by))
+
+    if Keyword.has_key?(opts, :limit) and Keyword.has_key?(opts, :top_k) do
+      raise ArgumentError, "multi_query takes :top_k or :limit, not both"
+    end
+
+    if Keyword.has_key?(opts, :limit) and is_nil(rerank_by) do
+      raise ArgumentError,
+            ":limit limits the fused results, so it takes :rerank_by. " <>
+              "Without it, set each query's :top_k"
+    end
 
     path = "/v2/namespaces/#{namespace.name}/query?stainless_overload=multiQuery"
 
@@ -184,21 +208,22 @@ defmodule Turbopuffer.Search do
 
     # turbopuffer ignores a top-level top_k, so each query's own top_k applies. A top-level limit
     # caps the fused list that rerank_by returns.
+    limit =
+      if rerank_by, do: Keyword.get_lazy(opts, :limit, fn -> Keyword.get(opts, :top_k, 10) end)
+
     body =
-      case rerank_by(Keyword.get(opts, :rerank_by)) do
-        nil -> %{"queries" => formatted_queries}
-        rerank_by -> %{"queries" => formatted_queries, "rerank_by" => rerank_by, "limit" => top_k}
-      end
+      %{"queries" => formatted_queries}
+      |> put("rerank_by", rerank_by)
+      |> put("limit", limit)
+      |> Query.put_consistency(opts[:consistency])
+      |> put("vector_encoding", vector_encoding(opts[:vector_encoding]))
 
     case Client.post(namespace.client, path, body) do
-      {:ok, %{"results" => results}} when is_list(results) ->
-        # One result per query, or a single fused result with rerank_by
-        all_rows =
-          results
-          |> Enum.flat_map(fn %{"rows" => rows} -> rows || [] end)
-          |> Enum.uniq_by(&Map.get(&1, "id"))
+      {:ok, %{"results" => [%{"rows" => rows}]}} when not is_nil(rerank_by) ->
+        {:ok, Result.from_maps(rows || [])}
 
-        {:ok, Result.from_maps(all_rows)}
+      {:ok, %{"results" => results}} when is_list(results) ->
+        {:ok, Enum.map(results, fn result -> Result.from_maps(result["rows"] || []) end)}
 
       response ->
         Query.results(response)
@@ -253,6 +278,14 @@ defmodule Turbopuffer.Search do
 
   defp put(body, _key, nil), do: body
   defp put(body, key, value), do: Map.put(body, key, value)
+
+  defp vector_encoding(nil), do: nil
+  defp vector_encoding(:float), do: "float"
+  defp vector_encoding(:base64), do: "base64"
+
+  defp vector_encoding(other) do
+    raise ArgumentError, "invalid :vector_encoding #{inspect(other)}, expected :float or :base64"
+  end
 
   defp rerank_by(nil), do: nil
   defp rerank_by(:rrf), do: ["RRF"]
