@@ -16,7 +16,8 @@ defmodule Turbopuffer.QueryTest do
   end
 
   defp query!(namespace, opts) do
-    {:ok, results} = Turbopuffer.query(namespace, Keyword.put_new(opts, :vector, [1.0, 0.0]))
+    opts = if opts[:rank_by], do: opts, else: Keyword.put_new(opts, :vector, [1.0, 0.0])
+    {:ok, results} = Turbopuffer.query(namespace, opts)
     results
   end
 
@@ -148,6 +149,36 @@ defmodule Turbopuffer.QueryTest do
                  text_attribute: "content"
                )
     end
+  end
+
+  test "rank_by orders by an attribute, and offset skips results", %{namespace: namespace} do
+    assert ids(query!(namespace, rank_by: ["size", "desc"])) == ["far", "mid", "near"]
+
+    assert ids(query!(namespace, rank_by: ["size", "desc"], top_k: 1, offset: 1)) ==
+             ["mid"]
+
+    assert [%{attributes: %{"color" => "blue"}} | _] =
+             query!(namespace, rank_by: ["size", "desc"])
+  end
+
+  test "limit caps the results for each value of the attributes in limit.per", %{
+    namespace: namespace
+  } do
+    limit = %{total: 3, per: %{attributes: ["color"], limit: 1}}
+    assert ids(query!(namespace, limit: limit)) == ["near", "far"]
+    assert ids(query!(namespace, limit: 2)) == ["near", "mid"]
+  end
+
+  test "compute_attributes adds each result's computed values to its attributes", %{
+    namespace: namespace
+  } do
+    assert [%{id: "far", attributes: %{"score" => score}} | _] =
+             query!(namespace,
+               rank_by: ["id", "asc"],
+               compute_attributes: %{"score" => ["vector", "VectorDist", [1.0, 0.0]]}
+             )
+
+    assert_in_delta score, 1.0, 1.0e-6
   end
 
   test "a namespace that doesn't exist is a 404", context do

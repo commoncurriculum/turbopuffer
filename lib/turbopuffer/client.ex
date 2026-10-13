@@ -99,7 +99,7 @@ defmodule Turbopuffer.Client do
       operation's result, polling for it until the operation finishes, as turbopuffer's own clients
       do. turbopuffer may answer straight away instead
 
-  `request/5`, `get/3`, `post/4`, and `delete/3` pass the others to `Finch.request/3`:
+  `request/5`, `get/3`, `post/4`, `patch/4`, and `delete/3` pass the others to `Finch.request/3`:
 
     * `:pool_timeout` - Milliseconds to wait for a connection from the pool (Finch's default: 5_000)
     * `:receive_timeout` - Milliseconds to wait for each chunk of the response (Finch's default:
@@ -182,6 +182,12 @@ defmodule Turbopuffer.Client do
   """
   @spec post(t(), String.t(), map(), Turbopuffer.request_opts()) :: response()
   def post(client, path, body, opts \\ []), do: request(client, :post, path, body, opts)
+
+  @doc """
+  Makes a PATCH request to the Turbopuffer API.
+  """
+  @spec patch(t(), String.t(), map(), Turbopuffer.request_opts()) :: response()
+  def patch(client, path, body, opts \\ []), do: request(client, :patch, path, body, opts)
 
   @doc """
   Makes a DELETE request to the Turbopuffer API.

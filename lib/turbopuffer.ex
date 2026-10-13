@@ -106,7 +106,11 @@ defmodule Turbopuffer do
   @type vector_query_opts :: [
           {:vector, ann_query()}
           | {:vector_attribute, String.t()}
+          | {:rank_by, list()}
           | {:top_k, pos_integer()}
+          | {:limit, pos_integer() | map()}
+          | {:offset, non_neg_integer()}
+          | {:compute_attributes, map()}
           | {:include_attributes, boolean() | [String.t()]}
           | {:include_vectors, boolean()}
           | {:exclude_attributes, [String.t()]}
@@ -217,11 +221,15 @@ defmodule Turbopuffer do
   defdelegate write(namespace, opts), to: Vector
 
   @doc """
-  Queries vectors by similarity.
+  Queries vectors by similarity, or ranks documents any other way with `:rank_by`.
 
   ## Options
-    * `:vector` - The query vector (required)
+    * `:vector` - The query vector (required without `:rank_by`)
+    * `:rank_by` - turbopuffer's own `rank_by`, instead of `:vector`
     * `:top_k` - Number of results to return (default: 10)
+    * `:limit` - turbopuffer's `limit`, instead of `:top_k`, to cap results per attribute value
+    * `:offset` - Number of results to skip
+    * `:compute_attributes` - Expressions to compute for each result
     * `:include_attributes` - List of attributes to include or boolean
     * `:include_vectors` - Whether to include vectors in response
     * `:exclude_attributes` - List of attributes to exclude, instead of `:include_attributes`
@@ -349,4 +357,46 @@ defmodule Turbopuffer do
   """
   @spec list_namespaces(Client.t(), list_namespaces_opts()) :: {:ok, map()} | {:error, term()}
   defdelegate list_namespaces(client, opts \\ []), to: Namespace, as: :list
+
+  @doc """
+  Returns a namespace's metadata. See `Turbopuffer.Namespace.metadata/1`.
+
+  ## Examples
+
+      {:ok, %{"approx_row_count" => count}} = Turbopuffer.metadata(namespace)
+  """
+  @spec metadata(Namespace.t()) :: {:ok, map()} | {:error, term()}
+  defdelegate metadata(namespace), to: Namespace
+
+  @doc """
+  Changes a namespace's `:read_only` or `:pinning` and returns the updated metadata. See
+  `Turbopuffer.Namespace.update_metadata/2`.
+
+  ## Examples
+
+      {:ok, _} = Turbopuffer.update_metadata(namespace, read_only: true)
+  """
+  @spec update_metadata(Namespace.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  defdelegate update_metadata(namespace, changes), to: Namespace
+
+  @doc """
+  Hints that queries to a namespace are coming, so turbopuffer can warm its cache. See
+  `Turbopuffer.Namespace.warm_cache/1`.
+
+  ## Examples
+
+      {:ok, _} = Turbopuffer.warm_cache(namespace)
+  """
+  @spec warm_cache(Namespace.t()) :: {:ok, map()} | {:error, term()}
+  defdelegate warm_cache(namespace), to: Namespace
+
+  @doc """
+  Measures the recall of a namespace's vector index. See `Turbopuffer.Namespace.recall/2`.
+
+  ## Examples
+
+      {:ok, %{"avg_recall" => recall}} = Turbopuffer.recall(namespace, num: 5)
+  """
+  @spec recall(Namespace.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  defdelegate recall(namespace, opts \\ []), to: Namespace
 end

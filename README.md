@@ -136,6 +136,12 @@ namespace = Turbopuffer.namespace(client, "namespace-name")
 
 # Delete namespace
 {:ok, _} = Turbopuffer.delete_namespace(namespace)
+
+# Metadata, read-only, cache warming, and recall
+{:ok, %{"approx_row_count" => count}} = Turbopuffer.metadata(namespace)
+{:ok, _} = Turbopuffer.update_metadata(namespace, read_only: true)
+{:ok, _} = Turbopuffer.warm_cache(namespace)
+{:ok, %{"avg_recall" => recall}} = Turbopuffer.recall(namespace, num: 5, top_k: 10)
 ```
 
 ### Vector Operations
@@ -156,6 +162,13 @@ vectors = [
   top_k: 10,
   include_attributes: ["text"],
   filters: %{"category" => "tutorial"}
+)
+
+# Order by an attribute instead, a page at a time
+{:ok, results} = Turbopuffer.query(namespace,
+  rank_by: ["id", "asc"],
+  top_k: 100,
+  offset: 100
 )
 
 # Delete vectors

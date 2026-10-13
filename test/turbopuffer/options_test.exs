@@ -12,8 +12,8 @@ defmodule Turbopuffer.OptionsTest do
       Turbopuffer.write(namespace, upsert_rows: [%{id: 1}], upsert_conditon: ["id", "Eq", nil])
     end
 
-    assert_raise ArgumentError, ~r/unknown keys \[:limit\]/, fn ->
-      Turbopuffer.query(namespace, vector: [0.1], limit: 5)
+    assert_raise ArgumentError, ~r/unknown keys \[:per\]/, fn ->
+      Turbopuffer.query(namespace, vector: [0.1], per: 5)
     end
 
     assert_raise ArgumentError, ~r/unknown keys \[:aggregate_by\]/, fn ->
@@ -51,6 +51,14 @@ defmodule Turbopuffer.OptionsTest do
 
     assert_raise ArgumentError, ~r/unknown keys \[:size\]/, fn ->
       Turbopuffer.list_namespaces(client, size: 5)
+    end
+
+    assert_raise ArgumentError, ~r/unknown keys \[:readonly\]/, fn ->
+      Turbopuffer.update_metadata(namespace, readonly: true)
+    end
+
+    assert_raise ArgumentError, ~r/unknown keys \[:queries\]/, fn ->
+      Turbopuffer.recall(namespace, queries: 5)
     end
   end
 
@@ -98,10 +106,27 @@ defmodule Turbopuffer.OptionsTest do
         include_vectors: true
       )
     end
+
+    assert_raise ArgumentError, ~r/list the vector attribute in :include_attributes/, fn ->
+      Turbopuffer.query(namespace, rank_by: ["id", "asc"], include_vectors: true)
+    end
+  end
+
+  test "query options turbopuffer can't combine raise", %{namespace: namespace} do
+    assert_raise ArgumentError, ~r/a :vector or a :rank_by, not both/, fn ->
+      Turbopuffer.query(namespace, vector: [0.1], rank_by: ["id", "asc"])
+    end
+
+    assert_raise ArgumentError, ~r/:top_k or :limit, not both/, fn ->
+      Turbopuffer.query(namespace, vector: [0.1], top_k: 5, limit: 5)
+    end
   end
 
   test "required options raise when they're missing", %{namespace: namespace} do
-    assert_raise KeyError, ~r/:vector/, fn -> Turbopuffer.query(namespace, top_k: 10) end
+    assert_raise ArgumentError, ~r/a :vector or a :rank_by/, fn ->
+      Turbopuffer.query(namespace, top_k: 10)
+    end
+
     assert_raise KeyError, ~r/:aggregate_by/, fn -> Turbopuffer.aggregate(namespace, []) end
   end
 end
