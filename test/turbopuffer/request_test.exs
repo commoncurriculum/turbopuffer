@@ -36,9 +36,13 @@ defmodule Turbopuffer.RequestTest do
                request_timeout: 15_000
              )
 
+    # The timed-out request gets its own pool: Finch can hand its connection, with the late
+    # response still arriving, to the next request, which then fails on the stray message.
+    start_supervised!({Finch, name: Turbopuffer.RequestTest.TimeoutFinch})
+    timeout_client = %{client | max_retries: 0, finch_name: Turbopuffer.RequestTest.TimeoutFinch}
+
     # Finch returns Mint.TransportError before 0.22 and Finch.TransportError from 0.22 on.
-    assert {:error, %{reason: :timeout}} =
-             Client.get(%{client | max_retries: 0}, path, receive_timeout: 1)
+    assert {:error, %{reason: :timeout}} = Client.get(timeout_client, path, receive_timeout: 1)
   end
 
   test "a connection error is retried :max_retries times" do

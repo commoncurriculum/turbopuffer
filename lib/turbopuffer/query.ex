@@ -14,6 +14,52 @@ defmodule Turbopuffer.Query do
             "Expected a boolean, :all, or a list of attribute name strings"
   end
 
+  @spec exclusive!(keyword(), atom(), atom()) :: :ok
+  def exclusive!(opts, a, b) do
+    if opts[a] != nil and opts[b] != nil do
+      raise ArgumentError, "turbopuffer takes #{inspect(a)} or #{inspect(b)}, not both"
+    end
+
+    :ok
+  end
+
+  @spec put(map(), String.t(), term()) :: map()
+  def put(body, _key, nil), do: body
+  def put(body, key, value), do: Map.put(body, key, value)
+
+  @spec put_limit(map(), keyword()) :: map()
+  def put_limit(body, opts) do
+    exclusive!(opts, :top_k, :limit)
+
+    case opts[:limit] do
+      nil -> Map.put(body, "top_k", Keyword.get(opts, :top_k, 10))
+      limit -> Map.put(body, "limit", limit)
+    end
+  end
+
+  @spec put_attributes(map(), keyword()) :: map()
+  def put_attributes(body, opts) do
+    exclusive!(opts, :include_attributes, :exclude_attributes)
+
+    case opts[:exclude_attributes] do
+      nil ->
+        include = Keyword.get(opts, :include_attributes, true)
+        Map.put(body, "include_attributes", normalize_include_attributes(include))
+
+      exclude ->
+        Map.put(body, "exclude_attributes", exclude)
+    end
+  end
+
+  @spec put_vector_encoding(map(), :float | :base64 | nil) :: map()
+  def put_vector_encoding(body, nil), do: body
+  def put_vector_encoding(body, :float), do: Map.put(body, "vector_encoding", "float")
+  def put_vector_encoding(body, :base64), do: Map.put(body, "vector_encoding", "base64")
+
+  def put_vector_encoding(_body, other) do
+    raise ArgumentError, "invalid :vector_encoding #{inspect(other)}, expected :float or :base64"
+  end
+
   @spec format_filters(Turbopuffer.filters() | list() | nil) :: list() | nil
   def format_filters(nil), do: nil
 
