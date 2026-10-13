@@ -188,12 +188,9 @@ defmodule Turbopuffer.Search do
     queries = Keyword.fetch!(opts, :queries)
     include_attributes = Keyword.get(opts, :include_attributes, true)
     rerank_by = rerank_by(Keyword.get(opts, :rerank_by))
+    Query.exclusive!(opts, :top_k, :limit)
 
-    if Keyword.has_key?(opts, :limit) and Keyword.has_key?(opts, :top_k) do
-      raise ArgumentError, "multi_query takes :top_k or :limit, not both"
-    end
-
-    if Keyword.has_key?(opts, :limit) and is_nil(rerank_by) do
+    if opts[:limit] != nil and rerank_by == nil do
       raise ArgumentError,
             ":limit limits the fused results, so it takes :rerank_by. " <>
               "Without it, set each query's :top_k"
@@ -208,15 +205,18 @@ defmodule Turbopuffer.Search do
 
     # turbopuffer ignores a top-level top_k, so each query's own top_k applies. A top-level limit
     # caps the fused list that rerank_by returns.
-    limit =
-      if rerank_by, do: Keyword.get_lazy(opts, :limit, fn -> Keyword.get(opts, :top_k, 10) end)
-
     body =
       %{"queries" => formatted_queries}
-      |> put("rerank_by", rerank_by)
-      |> put("limit", limit)
       |> Query.put_consistency(opts[:consistency])
-      |> put("vector_encoding", vector_encoding(opts[:vector_encoding]))
+      |> Query.put_vector_encoding(opts[:vector_encoding])
+
+    body =
+      if rerank_by do
+        limit = opts[:limit] || Keyword.get(opts, :top_k, 10)
+        Map.merge(body, %{"rerank_by" => rerank_by, "limit" => limit})
+      else
+        body
+      end
 
     case Client.post(namespace.client, path, body) do
       {:ok, %{"results" => [%{"rows" => rows}]}} when not is_nil(rerank_by) ->
@@ -264,8 +264,8 @@ defmodule Turbopuffer.Search do
 
     body =
       %{"aggregate_by" => Keyword.fetch!(opts, :aggregate_by)}
-      |> put("group_by", opts[:group_by])
-      |> put("top_k", opts[:top_k])
+      |> Query.put("group_by", opts[:group_by])
+      |> Query.put("top_k", opts[:top_k])
       |> Query.put_filters(opts[:filters])
       |> Query.put_consistency(opts[:consistency])
 
@@ -274,17 +274,6 @@ defmodule Turbopuffer.Search do
       {:ok, %{"aggregations" => aggregations}} -> {:ok, aggregations}
       other -> other
     end
-  end
-
-  defp put(body, _key, nil), do: body
-  defp put(body, key, value), do: Map.put(body, key, value)
-
-  defp vector_encoding(nil), do: nil
-  defp vector_encoding(:float), do: "float"
-  defp vector_encoding(:base64), do: "base64"
-
-  defp vector_encoding(other) do
-    raise ArgumentError, "invalid :vector_encoding #{inspect(other)}, expected :float or :base64"
   end
 
   defp rerank_by(nil), do: nil

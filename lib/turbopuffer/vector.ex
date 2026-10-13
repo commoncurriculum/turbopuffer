@@ -31,7 +31,11 @@ defmodule Turbopuffer.Vector do
   @query_options [
     :vector,
     :vector_attribute,
+    :rank_by,
     :top_k,
+    :limit,
+    :offset,
+    :compute_attributes,
     :include_attributes,
     :include_vectors,
     :exclude_attributes,
@@ -131,14 +135,23 @@ defmodule Turbopuffer.Vector do
   defp write_field({key, value}), do: [{Atom.to_string(key), value}]
 
   @doc """
-  Queries vectors by similarity.
+  Queries vectors by similarity, or ranks documents any other way turbopuffer can with `:rank_by`.
 
   ## Options
-    * `:vector` - The query vector (required). Pass `{:embed, text}` or `{:embed, text, model}` to have
-      turbopuffer embed the text (https://turbopuffer.com/docs/embedding)
+    * `:vector` - The query vector (required without `:rank_by`). Pass `{:embed, text}` or
+      `{:embed, text, model}` to have turbopuffer embed the text (https://turbopuffer.com/docs/embedding)
     * `:vector_attribute` - The attribute to search (default: "vector"). For native embedding, the
       string attribute that has `embed` in the schema
+    * `:rank_by` - turbopuffer's own `rank_by` (https://turbopuffer.com/docs/query#param-rank_by),
+      instead of `:vector`, e.g. `["id", "asc"]` or `["content", "BM25", "search terms"]`.
+      Results keep every attribute in `attributes`
     * `:top_k` - Number of results to return (default: 10)
+    * `:limit` - turbopuffer's `limit`, instead of `:top_k`: a number, or
+      `%{total: n, per: %{attributes: [...], limit: m}}` to return at most `m` documents for each
+      value of the attributes (https://turbopuffer.com/docs/query#diversification)
+    * `:offset` - Number of results to skip, e.g. to page through results
+    * `:compute_attributes` - A map from labels to turbopuffer's expressions to compute for each
+      result (https://turbopuffer.com/docs/query#param-compute_attributes), returned in `attributes`
     * `:include_attributes` - List of attributes to include in results, `true` or `:all` for all of
       them, or `false` for none (default: true)
     * `:include_vectors` - Whether to include `:vector_attribute` in results, as each result's
@@ -182,27 +195,58 @@ defmodule Turbopuffer.Vector do
         vector: {:embed, "foxes that jump"},
         vector_attribute: "content"
       )
+
+      # Page through every document by id, as https://turbopuffer.com/docs/export does
+      Turbopuffer.Vector.query(namespace,
+        rank_by: ["id", "asc"],
+        top_k: 1_000,
+        filters: ["id", "Gt", last_id]
+      )
   """
   @spec query(Namespace.t(), Turbopuffer.vector_query_opts()) ::
           {:ok, Turbopuffer.query_response()} | {:error, term()}
   def query(%Namespace{} = namespace, opts) do
     Keyword.validate!(opts, @query_options)
-    vector = Keyword.fetch!(opts, :vector)
-    vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
+    {body, vector_attribute} = ranking(opts)
 
     body =
-      %{
-        "rank_by" => RankBy.ann(vector_attribute, vector),
-        "top_k" => Keyword.get(opts, :top_k, 10)
-      }
-      |> Map.merge(attributes(opts, vector, vector_attribute))
+      body
+      |> Query.put_limit(opts)
       |> Query.put_filters(opts[:filters])
-      |> put_option("vector_encoding", opts[:vector_encoding], &encoding/1)
+      |> Query.put("offset", opts[:offset])
+      |> Query.put("compute_attributes", opts[:compute_attributes])
+      |> Query.put_vector_encoding(opts[:vector_encoding])
       |> Query.put_consistency(opts[:consistency])
 
     namespace.client
     |> Client.post("/v2/namespaces/#{namespace.name}/query", body)
-    |> Query.results(if is_list(vector), do: vector_attribute)
+    |> Query.results(vector_attribute)
+  end
+
+  defp ranking(opts) do
+    Query.exclusive!(opts, :vector, :rank_by)
+
+    case Keyword.fetch(opts, :vector) do
+      {:ok, vector} ->
+        vector_attribute = Keyword.get(opts, :vector_attribute, "vector")
+
+        body =
+          %{"rank_by" => RankBy.ann(vector_attribute, vector)}
+          |> Map.merge(attributes(opts, vector, vector_attribute))
+
+        {body, if(is_list(vector), do: vector_attribute)}
+
+      :error ->
+        if opts[:rank_by] == nil, do: raise(ArgumentError, "query takes a :vector or a :rank_by")
+
+        if opts[:include_vectors] || opts[:vector_attribute] do
+          raise ArgumentError,
+                ":include_vectors and :vector_attribute go with :vector, not :rank_by, " <>
+                  "so list the vector attribute in :include_attributes instead"
+        end
+
+        {Query.put_attributes(%{"rank_by" => opts[:rank_by]}, opts), nil}
+    end
   end
 
   # turbopuffer's include_attributes: true returns vectors too, so leaving them out takes
@@ -218,10 +262,7 @@ defmodule Turbopuffer.Vector do
               "so add that attribute to :include_attributes instead"
     end
 
-    if exclude && Keyword.has_key?(opts, :include_attributes) do
-      raise ArgumentError,
-            "turbopuffer takes :include_attributes or :exclude_attributes, not both"
-    end
+    Query.exclusive!(opts, :include_attributes, :exclude_attributes)
 
     case include do
       true when include_vectors and is_list(exclude) ->
@@ -252,16 +293,6 @@ defmodule Turbopuffer.Vector do
       attributes ->
         %{"include_attributes" => attributes}
     end
-  end
-
-  defp put_option(body, _key, nil, _format), do: body
-  defp put_option(body, key, value, format), do: Map.put(body, key, format.(value))
-
-  defp encoding(:float), do: "float"
-  defp encoding(:base64), do: "base64"
-
-  defp encoding(other) do
-    raise ArgumentError, "invalid :vector_encoding #{inspect(other)}, expected :float or :base64"
   end
 
   # Format vectors for write operations - attributes are flattened
